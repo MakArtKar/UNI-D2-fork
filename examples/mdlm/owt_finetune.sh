@@ -10,8 +10,8 @@ cd "${REPO_ROOT}"
 
 export PYTHONPATH=src
 
-# Path to converted checkpoint
-CHECKPOINT_PATH="${CHECKPOINT_PATH:-checkpoints/mdlm_full.ckpt}"
+# Path to converted checkpoint (use absolute path)
+CHECKPOINT_PATH="${CHECKPOINT_PATH:-${REPO_ROOT}/checkpoints/mdlm_full.ckpt}"
 
 # Max sequence length (default 1024)
 MAX_LENGTH="${MAX_LENGTH:-1024}"
