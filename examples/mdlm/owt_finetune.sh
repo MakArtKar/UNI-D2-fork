@@ -39,7 +39,7 @@ python -u -m discrete_diffusion \
     loader.global_batch_size=512 \
     loader.num_workers=32 \
     trainer.num_nodes=1 \
-    trainer.devices=1 \
+    trainer.devices=8 \
     trainer.max_steps=100_000 \
     trainer.val_check_interval=1000 \
     trainer.log_every_n_steps=100 \
