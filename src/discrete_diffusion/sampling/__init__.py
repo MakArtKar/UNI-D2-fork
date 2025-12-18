@@ -8,6 +8,7 @@ from .base import Sampler
 from .bd3lm import BD3LMSampler
 from .gidd import GIDDSampler
 from .partition import PartitionSampler
+from .starshape import StarShapeSampler
 from .uniform import UniformSampler
 
 __all__ = [
@@ -17,5 +18,6 @@ __all__ = [
   "BD3LMSampler",
   "GIDDSampler",
   "PartitionSampler",
+  "StarShapeSampler",
   "UniformSampler",
 ]

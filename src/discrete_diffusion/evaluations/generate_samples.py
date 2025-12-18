@@ -13,7 +13,7 @@ from omegaconf import OmegaConf
 
 from discrete_diffusion.data import get_tokenizer
 
-@hydra.main(config_path="../../../configs/eval", config_name="generate_samples", version_base="1.3")
+@hydra.main(config_path="../../../configs", config_name="generate_samples", version_base="1.3")
 def main(cfg):
     device = torch.device(cfg.device if torch.cuda.is_available() else "cpu")
     torch.set_float32_matmul_precision('high')
@@ -38,6 +38,13 @@ def main(cfg):
     # Ensure it's an OmegaConf object
     if not isinstance(model_config, (dict, list, OmegaConf.get_type("DictConfig"), OmegaConf.get_type("ListConfig"))):
          model_config = OmegaConf.create(model_config)
+    
+    # Override sampling config if provided in CLI arguments
+    if cfg.get("sampling", None) is not None:
+        OmegaConf.set_struct(model_config.sampling, False)
+        model_config.sampling = OmegaConf.merge(model_config.sampling, cfg.sampling)
+        OmegaConf.set_struct(model_config.sampling, True)
+        print(f"Sampling config overridden: {cfg.sampling.sampler._target_}")
     
     # Get tokenizer - use the one from checkpoint to ensure compatibility
     print("Loading tokenizer...")

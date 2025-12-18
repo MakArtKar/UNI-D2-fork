@@ -46,7 +46,6 @@ python -u -m discrete_diffusion \
     callbacks.checkpoint_every_n_steps.every_n_train_steps=5_000 \
     callbacks.checkpoint_every_n_steps.save_top_k=-1 \
     callbacks.checkpoint_every_n_steps.save_last=true \
-    callbacks.checkpoint_every_n_steps.dirpath=./outputs/owt/mdlm_finetune_len${MAX_LENGTH}/checkpoints \
     callbacks.checkpoint_monitor.save_top_k=1 \
     callbacks.sample_saver.enabled=true \
     callbacks.sample_saver.every_n_steps=1000 \

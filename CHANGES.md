@@ -105,3 +105,78 @@ MAX_LENGTH=128 bash examples/mdlm/owt_finetune.sh
 **Modified:**
 - `src/discrete_diffusion/evaluations/generate_samples.py` - Added EMA activation and checkpoint tokenizer loading
 
+---
+
+## StarShape Sampling Implementation
+
+### 1. Refactored AbsorbingSampler
+Modified `src/discrete_diffusion/sampling/absorbing.py` to extract reusable helper methods:
+- `_sample_x0()` - Samples x0 from model predictions
+- `_mask_tokens_mdlm()` - MDLM masking logic
+
+### 2. Config Restructuring
+Moved evaluation configs to root for Hydra config group access:
+- `configs/eval/generate_samples.yaml` → `configs/generate_samples.yaml`
+- `configs/eval/gen_ppl.yaml` → `configs/gen_ppl.yaml`
+- Added `defaults: [optional sampling: null]` to enable sampler override
+
+### 3. StarShape Sampler
+**File**: `src/discrete_diffusion/sampling/starshape.py`
+
+Implements two-phase sampling controlled by `t_on` hyperparameter:
+- **Phase 1 (t > t_on)**: Standard MDLM denoising
+- **Phase 2 (t ≤ t_on)**: Random masking from sampled x0
+
+**Key optimizations:**
+- GPU-resident operations with `torch.topk`
+- Uses `torch.all(t > self.t_on)` to avoid GPU-CPU sync
+- In-place modification
+
+### 4. Updated Generation Script
+Modified `src/discrete_diffusion/evaluations/generate_samples.py`:
+```python
+if cfg.get("sampling", None) is not None:
+    model_config.sampling = OmegaConf.merge(model_config.sampling, cfg.sampling)
+```
+
+### 5. Unit Tests
+**File**: `tests/sampling/test_starshape.py`
+
+All tests passing ✅
+
+### 6. Sample Generation
+
+**Usage:**
+```bash
+python src/discrete_diffusion/evaluations/generate_samples.py \
+    checkpoint_path=outputs/owt/mdlm_finetune_len128/dummy_checkpoints/checkpoints/best.ckpt \
+    sampling=starshape \
+    num_samples=8 \
+    batch_size=8 \
+    save_text=true \
+    device=cuda
+```
+
+**Performance:** ~2 seconds for 8 samples on GPU
+
+**Example output:**
+```
+Sample 0:
+'and if you don't accept that, I'm going to be your fault,'' ' she says." 
+She's had many problems of her own. Learning a new world champion, for example, 
+creates a lack of clarity over a champion's strategy.
+```
+
+### Files Modified/Created
+
+**Created:**
+- `src/discrete_diffusion/sampling/starshape.py` - StarShape sampler (122 lines)
+- `configs/sampling/starshape.yaml` - Config with `t_on=0.1`
+- `tests/sampling/test_starshape.py` - Unit tests (175 lines)
+
+**Modified:**
+- `src/discrete_diffusion/sampling/absorbing.py` - Extracted helper methods
+- `src/discrete_diffusion/sampling/__init__.py` - Registered StarShapeSampler
+- `src/discrete_diffusion/evaluations/generate_samples.py` - Added sampling override
+- `configs/generate_samples.yaml` - Moved from eval/, added sampling defaults
+

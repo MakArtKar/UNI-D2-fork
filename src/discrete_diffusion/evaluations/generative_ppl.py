@@ -80,7 +80,7 @@ def _retokenize(
   return input_ids, attn_mask, eval_context_size
 
 
-@hydra.main(config_path='../../../configs/eval', config_name='gen_ppl', version_base='1.3')
+@hydra.main(config_path='../../../configs', config_name='gen_ppl', version_base='1.3')
 def main(cfg):
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
   torch.set_float32_matmul_precision('high')
