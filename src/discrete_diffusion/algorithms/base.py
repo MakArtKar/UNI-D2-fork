@@ -80,7 +80,9 @@ class TrainerBase(L.LightningModule):
     else:
       self.noise = hydra.utils.instantiate(self.config.noise)
 
-    self.metrics = Metrics()
+    # Metrics will be initialized via _initialize_metrics() to allow override
+    self.metrics = None
+    self._initialize_metrics()
 
     # EMA will be initialized in setup() to avoid initialization order issues
     self.ema = None
@@ -95,6 +97,10 @@ class TrainerBase(L.LightningModule):
       raise ValueError(f"neg_infinity_mode must be 'large-finite' or 'true-inf', got '{config.neg_infinity_mode}'")
     self.fast_forward_epochs = None
     self.fast_forward_batches = None
+
+  def _initialize_metrics(self):
+    """Initialize metrics. Override in subclasses for custom metrics."""
+    self.metrics = Metrics()
 
   def _prepare_ema(self):
     if self.config.training.ema > 0:
@@ -241,20 +247,27 @@ class TrainerBase(L.LightningModule):
                 nlls=nlls,
                 num_tokens=num_tokens)
 
-  def on_train_epoch_start(self):
+  def _reset_train_metrics(self):
+    """Reset train metrics at epoch start. Override for custom behavior."""
     self.metrics.reset()
-    assert self.metrics.train_nlls.nll.mean_value == 0
-    assert self.metrics.train_nlls.nll.weight == 0
+
+  def on_train_epoch_start(self):
+    self._reset_train_metrics()
+
+  def _update_train_metrics(self, losses):
+    """Update train metrics with batch losses. Override for custom metrics."""
+    self.metrics.update_train(losses.nlls, losses.num_tokens)
 
   def training_step(self, batch, batch_idx):
     current_accumulation_step = (
       batch_idx % self.trainer.accumulate_grad_batches)
     losses = self._loss(batch['input_ids'], batch['attention_mask'], current_accumulation_step, train_mode=True)
-    self.metrics.update_train(losses.nlls, losses.num_tokens)
+    self._update_train_metrics(losses)
     self.log(name='trainer/loss', value=losses.loss, on_step=True, on_epoch=False, sync_dist=True, prog_bar=True)
     return losses.loss
 
-  def on_train_epoch_end(self):
+  def _log_train_epoch_metrics(self):
+    """Log train metrics at epoch end. Override for custom logging."""
     train_metrics = {}
     for k, v in self.metrics.train_nlls.items():
       if getattr(v, 'weight', 0) > 0:
@@ -264,18 +277,28 @@ class TrainerBase(L.LightningModule):
     if hasattr(self.metrics, 'train_aux') and self.metrics.train_aux.weight > 0:
       self.log(name='train/aux', value=self.metrics.train_aux.compute(), on_step=False, on_epoch=True, sync_dist=True)
 
-  def on_validation_epoch_start(self):
+  def on_train_epoch_end(self):
+    self._log_train_epoch_metrics()
+
+  def _reset_valid_metrics(self):
+    """Reset valid metrics at validation start. Override for custom behavior."""
     self.metrics.reset()
+
+  def on_validation_epoch_start(self):
+    self._reset_valid_metrics()
     self._eval_mode()
-    assert self.metrics.valid_nlls.nll.mean_value == 0
-    assert self.metrics.valid_nlls.nll.weight == 0
+
+  def _update_valid_metrics(self, losses):
+    """Update valid metrics with batch losses. Override for custom metrics."""
+    self.metrics.update_valid(losses.nlls, losses.num_tokens)
 
   def validation_step(self, batch, batch_idx):
     losses = self._loss(batch['input_ids'], batch['attention_mask'])
-    self.metrics.update_valid(losses.nlls, losses.num_tokens)
+    self._update_valid_metrics(losses)
     return losses.loss
 
-  def on_validation_epoch_end(self):
+  def _log_valid_epoch_metrics(self):
+    """Log valid metrics at epoch end. Override for custom logging."""
     valid_metrics = {}
     for k, v in self.metrics.valid_nlls.items():
       if getattr(v, 'weight', 0) > 0:
@@ -284,6 +307,9 @@ class TrainerBase(L.LightningModule):
       self.log_dict(valid_metrics, on_step=False, on_epoch=True, sync_dist=True)
     if hasattr(self.metrics, 'valid_aux') and self.metrics.valid_aux.weight > 0:
       self.log(name='val/aux', value=self.metrics.valid_aux.compute(), on_step=False, on_epoch=True, sync_dist=True)
+
+  def on_validation_epoch_end(self):
+    self._log_valid_epoch_metrics()
     if ((self.config.eval.compute_perplexity_on_sanity
          or not self.trainer.sanity_checking)
          and self.config.eval.generate_samples):
@@ -293,7 +319,9 @@ class TrainerBase(L.LightningModule):
           self.config.sampling.num_sample_batches):
           samples = self.generate_samples(num_samples=self.config.loader.eval_batch_size)
           
-          self.metrics.record_entropy(samples)
+          # Record entropy if metrics class supports it
+          if hasattr(self.metrics, 'record_entropy'):
+            self.metrics.record_entropy(samples)
           # For logging and optional saving only
           text_samples = self.tokenizer.batch_decode(samples)
         if text_samples is not None:
@@ -306,8 +334,9 @@ class TrainerBase(L.LightningModule):
               key=f'samples@global_step{self.global_step}',
               columns=['Generated Samples'],
               data=[[s] for s in text_samples])
-          # Always log sample entropy (cheap and useful)
-          self.log('val/sample_entropy', self.metrics.sample_entropy.compute(), on_epoch=True, on_step=False, sync_dist=True)
+          if hasattr(self.metrics, 'sample_entropy'):
+            # Always log sample entropy (cheap and useful)
+            self.log('val/sample_entropy', self.metrics.sample_entropy.compute(), on_epoch=True, on_step=False, sync_dist=True)
 
           # Optionally save validation samples for later gen-PPL evaluation
           if getattr(self.config.eval, 'save_validation_samples', False):

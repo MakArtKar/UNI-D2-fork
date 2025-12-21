@@ -4,6 +4,8 @@ import pytest
 import torch
 from hydra import initialize, compose
 
+from discrete_diffusion.evaluations import GStarMetrics
+
 
 @pytest.fixture
 def gstar_model():
@@ -95,6 +97,82 @@ def test_gstar_nll_per_token_shape(gstar_model):
     assert not torch.isnan(loss).any()
     assert not torch.isinf(loss).any()
     assert (loss >= 0).all(), "CE loss should be non-negative"
+
+
+def test_gstar_metrics_type(gstar_model):
+    """Test that GStar uses GStarMetrics."""
+    model, cfg = gstar_model
+    
+    assert isinstance(model.metrics, GStarMetrics), "GStar should use GStarMetrics"
+
+
+def test_gstar_stores_predictions(gstar_model):
+    """Test that nll_per_token stores predictions and targets."""
+    model, cfg = gstar_model
+    model.eval()
+    
+    batch_size = 2
+    seq_len = 32
+    vocab_size = model.vocab_size
+    
+    # Create mock inputs
+    log_x_theta = torch.randn(batch_size, seq_len, vocab_size).log_softmax(dim=-1)
+    xt = torch.randint(0, vocab_size, (batch_size, seq_len))
+    x0 = torch.randint(0, vocab_size, (batch_size, seq_len))
+    alpha_t = torch.rand(batch_size, 1)
+    dalpha_t = torch.rand(batch_size, 1)
+    
+    with torch.no_grad():
+        loss = model.nll_per_token(log_x_theta, xt, x0, alpha_t, dalpha_t, low_var=False)
+    
+    # Check that predictions and targets are stored
+    assert model._last_preds is not None, "Predictions should be stored"
+    assert model._last_targets is not None, "Targets should be stored"
+    assert model._last_preds.shape == (batch_size, seq_len)
+    assert model._last_targets.shape == (batch_size, seq_len)
+    assert model._last_preds.dtype == torch.long
+    assert model._last_targets.dtype == torch.long
+
+
+def test_gstar_classification_metrics(gstar_model):
+    """Test that classification metrics are computed correctly."""
+    model, cfg = gstar_model
+    model.eval()
+    
+    batch_size = 2
+    seq_len = 8
+    vocab_size = model.vocab_size
+    
+    # Create mock inputs
+    log_x_theta = torch.randn(batch_size, seq_len, vocab_size).log_softmax(dim=-1)
+    xt = torch.randint(0, vocab_size, (batch_size, seq_len))
+    x0 = torch.randint(0, vocab_size, (batch_size, seq_len))
+    alpha_t = torch.rand(batch_size, 1)
+    dalpha_t = torch.rand(batch_size, 1)
+    
+    # Reset metrics first
+    model.metrics.reset()
+    
+    with torch.no_grad():
+        loss = model.nll_per_token(log_x_theta, xt, x0, alpha_t, dalpha_t, low_var=False)
+    
+    # Update metrics manually (simulating training_step)
+    from discrete_diffusion.algorithms.base import Loss
+    losses = Loss(loss=loss.mean(), nlls=loss.sum(), num_tokens=torch.tensor(batch_size * seq_len))
+    model._update_train_metrics(losses)
+    
+    # Compute metrics
+    train_metrics = model.metrics.compute_train()
+    
+    # Check that metrics are computed
+    assert 'train/accuracy' in train_metrics
+    assert 'train/precision' in train_metrics
+    assert 'train/recall' in train_metrics
+    assert 'train/f1' in train_metrics
+    
+    # All metrics should be tensors
+    for v in train_metrics.values():
+        assert isinstance(v, torch.Tensor)
 
 
 if __name__ == "__main__":

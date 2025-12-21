@@ -237,28 +237,51 @@ training.finetune_path="$MDLM_CHECKPOINT" \
 ++training.strict_load=False \
 ```
 
-### 7. Unit Tests
+### 7. Binary Classification Metrics
 
-**Files**: `tests/test_algorithms/test_gstar.py`, `tests/test_models/test_dit.py`
+Added comprehensive metrics tracking for GStar's remasker binary classification task.
+
+**File**: `src/discrete_diffusion/evaluations/metrics.py`
+
+Created `GStarMetrics` class with binary classification metrics:
+- **Train metrics**: accuracy, precision, recall, F1 score
+- **Validation metrics**: accuracy, precision, recall, F1 score
+- Uses `torchmetrics.classification` for robust metric computation
+
+**Metrics logged:**
+- `train/accuracy`, `train/precision`, `train/recall`, `train/f1`
+- `val/accuracy`, `val/precision`, `val/recall`, `val/f1`
+
+**Checkpoint monitoring:**
+- Updated training scripts to monitor `val/f1` with `mode=max` for best model selection
+
+### 8. Unit Tests
+
+**Files**: `tests/test_algorithms/test_gstar.py`, `tests/test_evaluations/test_gstar_metrics.py`
 
 All tests passing ✅
 - Tests DIT `return_hidden_states` functionality
 - Tests GStar initialization, parameter freezing, and forward passes
+- Tests GStarMetrics initialization, update, compute, reset, and device movement
+- Tests GStar classification metrics computation and logging
 - Uses Hydra configs for realistic testing
 
 ### Files Modified/Created
 
 **Created:**
-- `src/discrete_diffusion/algorithms/gstar.py` - GStar algorithm (129 lines)
+- `src/discrete_diffusion/algorithms/gstar.py` - GStar algorithm (165 lines)
+- `src/discrete_diffusion/evaluations/metrics.py` - Added `GStarMetrics` class
 - `configs/algo/gstar.yaml` - GStar config (inherits from mdlm)
-- `examples/gstar/owt.sh` - Training script
+- `examples/gstar/owt.sh` - Training script with checkpoint monitor override
 - `tests/test_algorithms/test_gstar.py` - GStar unit tests
-- `tests/test_models/test_dit.py` - DIT unit tests
+- `tests/test_evaluations/test_gstar_metrics.py` - GStarMetrics unit tests
 - `tests/test_integration/test_gstar_training.sh` - Integration test
 
 **Modified:**
 - `src/discrete_diffusion/models/dit.py` - Added `return_hidden_states` parameter
-- `src/discrete_diffusion/algorithms/base.py` - Moved EMA initialization to `setup()`
+- `src/discrete_diffusion/algorithms/base.py` - Refactored metrics initialization and validation hooks
+- `src/discrete_diffusion/algorithms/bd3lm.py` - Updated to use refactored metrics initialization
 - `src/discrete_diffusion/algorithms/__init__.py` - Registered GStar
 - `src/discrete_diffusion/train.py` - Added `strict_load` support
+- `src/discrete_diffusion/evaluations/__init__.py` - Exported `GStarMetrics`
 

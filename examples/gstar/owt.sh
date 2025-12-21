@@ -37,6 +37,8 @@ python -u -m discrete_diffusion \
     callbacks.checkpoint_every_n_steps.every_n_train_steps=5_000 \
     callbacks.checkpoint_every_n_steps.save_top_k=-1 \
     callbacks.checkpoint_every_n_steps.save_last=true \
+    callbacks.checkpoint_monitor.monitor=val/f1 \
+    callbacks.checkpoint_monitor.mode=max \
     callbacks.checkpoint_monitor.save_top_k=1 \
     callbacks.sample_saver.enabled=false \
     checkpointing.resume_from_ckpt=false \

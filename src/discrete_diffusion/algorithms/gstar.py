@@ -4,6 +4,7 @@ import torch
 import torch.nn.functional as F
 
 from .mdlm import MDLM
+from ..evaluations import GStarMetrics
 from ..forward_process.utils import sample_categorical
 from ..models.common import DDiTFinalLayer
 
@@ -42,6 +43,34 @@ class GStar(MDLM):
             cond_dim=cond_dim,
             adaLN=adaLN
         )
+        
+        # Storage for predictions and targets (set in nll_per_token)
+        self._last_preds = None
+        self._last_targets = None
+        
+    def _initialize_metrics(self):
+        """Override to use GStar-specific binary classification metrics."""
+        self.metrics = GStarMetrics()
+    
+    def _update_train_metrics(self, losses):
+        """Update train metrics with batch predictions and targets."""
+        if self._last_preds is not None and self._last_targets is not None:
+            self.metrics.update_train(self._last_preds, self._last_targets)
+    
+    def _update_valid_metrics(self, losses):
+        """Update valid metrics with batch predictions and targets."""
+        if self._last_preds is not None and self._last_targets is not None:
+            self.metrics.update_valid(self._last_preds, self._last_targets)
+    
+    def _log_train_epoch_metrics(self):
+        """Log train metrics at epoch end."""
+        metrics = self.metrics.compute_train()
+        self.log_dict(metrics, on_step=False, on_epoch=True, sync_dist=True)
+    
+    def _log_valid_epoch_metrics(self):
+        """Log validation metrics at epoch end."""
+        metrics = self.metrics.compute_valid()
+        self.log_dict(metrics, on_step=False, on_epoch=True, sync_dist=True)
         
     def _get_parameters(self):
         """Only return remasker_head parameters for optimization."""
@@ -113,6 +142,13 @@ class GStar(MDLM):
         
         # Compute binary targets: 1 if error, 0 if correct
         targets = (sampled_x0 != x0).long()  # [batch, seq_len]
+        
+        # Get predictions (argmax of logits)
+        preds = remasker_logits.argmax(dim=-1)  # [batch, seq_len]
+        
+        # Store predictions and targets for metric computation
+        self._last_preds = preds.detach()
+        self._last_targets = targets.detach()
         
         # Cross-entropy loss per token (raw, no rescheduling)
         # remasker_logits: [batch, seq_len, 2]
