@@ -180,3 +180,85 @@ creates a lack of clarity over a champion's strategy.
 - `src/discrete_diffusion/evaluations/generate_samples.py` - Added sampling override
 - `configs/generate_samples.yaml` - Moved from eval/, added sampling defaults
 
+---
+
+## GStar Algorithm Implementation
+
+### 1. Algorithm Overview
+
+GStar is a meta-learning algorithm that trains a "remasker" head to detect when MDLM makes prediction errors. It freezes a pretrained MDLM backbone and trains only a binary classification head that predicts whether MDLM's sampled predictions differ from ground truth.
+
+**Training flow:**
+1. Standard MDLM forward: `xt -> log_x_theta`
+2. Sample: `sampled_x0 = sample_categorical(exp(log_x_theta))`
+3. Remasker forward: `sampled_x0 -> hidden_states -> remasker_logits`
+4. Loss: `CE(remasker_logits, sampled_x0 != x0)`
+
+### 2. DIT Model Refactoring
+
+Modified `src/discrete_diffusion/models/dit.py` to support hidden state extraction:
+- Added `return_hidden_states: bool = False` parameter to `forward()`
+- When `True`, returns hidden states after transformer blocks (before output layer)
+- Enables remasker to reuse frozen backbone representations
+
+### 3. TrainerBase EMA Initialization
+
+Refactored `src/discrete_diffusion/algorithms/base.py`:
+- Moved `_prepare_ema()` from `__init__` to `setup()` hook
+- Fixes initialization order issues when subclassing (e.g., GStar's remasker_head)
+
+### 4. GStar Algorithm
+
+**File**: `src/discrete_diffusion/algorithms/gstar.py`
+
+- Inherits from MDLM, freezes backbone and noise schedule
+- Initializes trainable `remasker_head` (DDiTFinalLayer with 2 output classes)
+- Overrides `nll_per_token()` to compute remasker CE loss instead of MDLM NLL
+- Overrides `_get_parameters()` to return only remasker_head parameters
+
+**Key methods:**
+- `_remasker_forward(sampled_x0, sigma)`: Passes sampled predictions through frozen backbone to get hidden states, then through remasker head
+- `nll_per_token()`: Samples x0 from MDLM, computes binary targets `(sampled_x0 != x0)`, returns raw CE loss (no rescheduling)
+
+### 5. Checkpoint Loading
+
+Modified `src/discrete_diffusion/train.py`:
+- Added `strict_load` config parameter (defaults to `True`)
+- Passes `strict=config.training.get("strict_load", True)` to `load_from_checkpoint()`
+- Allows non-strict loading for MDLM checkpoints (missing remasker_head keys)
+
+### 6. Training Script
+
+**File**: `examples/gstar/owt.sh`
+
+Loads pretrained MDLM checkpoint as frozen backbone:
+```bash
+training.finetune_path="$MDLM_CHECKPOINT" \
+++training.strict_load=False \
+```
+
+### 7. Unit Tests
+
+**Files**: `tests/test_algorithms/test_gstar.py`, `tests/test_models/test_dit.py`
+
+All tests passing ✅
+- Tests DIT `return_hidden_states` functionality
+- Tests GStar initialization, parameter freezing, and forward passes
+- Uses Hydra configs for realistic testing
+
+### Files Modified/Created
+
+**Created:**
+- `src/discrete_diffusion/algorithms/gstar.py` - GStar algorithm (129 lines)
+- `configs/algo/gstar.yaml` - GStar config (inherits from mdlm)
+- `examples/gstar/owt.sh` - Training script
+- `tests/test_algorithms/test_gstar.py` - GStar unit tests
+- `tests/test_models/test_dit.py` - DIT unit tests
+- `tests/test_integration/test_gstar_training.sh` - Integration test
+
+**Modified:**
+- `src/discrete_diffusion/models/dit.py` - Added `return_hidden_states` parameter
+- `src/discrete_diffusion/algorithms/base.py` - Moved EMA initialization to `setup()`
+- `src/discrete_diffusion/algorithms/__init__.py` - Registered GStar
+- `src/discrete_diffusion/train.py` - Added `strict_load` support
+

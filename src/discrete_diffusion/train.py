@@ -65,8 +65,9 @@ def train(config):
 
   if config.training.finetune_path != '':
     assert utils.fsspec_exists(config.training.finetune_path)
+    strict_load = config.training.get("strict_load", True)
     model = algo_cls.load_from_checkpoint(
-      config.training.finetune_path, tokenizer=tokenizer, config=config)
+      config.training.finetune_path, strict=strict_load, tokenizer=tokenizer, config=config)
   else:
     model = algo_cls(config, tokenizer=tokenizer)
 

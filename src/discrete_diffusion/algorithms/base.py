@@ -82,7 +82,8 @@ class TrainerBase(L.LightningModule):
 
     self.metrics = Metrics()
 
-    self._prepare_ema()
+    # EMA will be initialized in setup() to avoid initialization order issues
+    self.ema = None
     self.lr = self.config.optim.lr
     self.sampling_eps = self.config.training.sampling_eps
     self.time_conditioning = self.config.algo.time_conditioning
@@ -100,6 +101,15 @@ class TrainerBase(L.LightningModule):
       self.ema = create_ema(self._get_parameters(), decay=self.config.training.ema)
     else:
       self.ema = None
+  
+  def setup(self, stage: str):
+    """Called by Lightning before training/validation/test.
+    
+    Initializes EMA here to ensure all model components (including subclass
+    additions like remasker_head in GStar) are ready before EMA wraps parameters.
+    """
+    if self.ema is None:  # Only prepare once
+      self._prepare_ema()
 
   def _validate_configuration(self):
     if self.config.algo.parameterization == 'ar':

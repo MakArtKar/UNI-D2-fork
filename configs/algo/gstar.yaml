@@ -1,0 +1,6 @@
+defaults:
+  - mdlm  # Inherit from MDLM config
+
+# Override only what's different
+_target_: discrete_diffusion.algorithms.gstar.GStar
+name: gstar
