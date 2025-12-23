@@ -1,6 +1,7 @@
-"""Standalone Generative Perplexity evaluation.
+"""Standalone Generative Perplexity and Diversity evaluation.
 
 Loads generated samples and evaluates NLL/PPL with a chosen eval LM.
+Also computes diversity metrics using the diversity library.
 Supports multi-GPU parallel evaluation by dividing samples across GPUs.
 
 Supported sample formats:
@@ -24,6 +25,34 @@ import torch
 import torch.nn.functional as F
 import torch.multiprocessing as mp
 from transformers import AutoModelForCausalLM, AutoTokenizer
+
+
+from typing import List
+import nltk
+
+def ngram_diversity_score(
+        data: List[str],
+        num_n: int = 4, 
+) -> float:
+    """ Calculates corpus-level ngram diversity based on unique ngrams 
+       (e.g., https://arxiv.org/pdf/2202.00666.pdf).
+
+    Args:
+        data (List[str]): List of documents. 
+        num_n (int): Max ngrams to test up to. Defaults to 5. 
+
+    Returns:
+        float: ngram diveristy score.
+    """
+    score = 1.
+    data = ' '.join(data).split(' ') # format to list of words
+
+    for i in range(2, num_n + 1): 
+        ngrams = list(nltk.ngrams(data, i))
+        # num unique ngrams / all ngrams for each size n 
+        score *= len(set(ngrams)) / len(ngrams) 
+
+    return round(score, 3)
 
 
 def _load_samples(samples_path: str) -> np.ndarray:
@@ -80,6 +109,24 @@ def _retokenize(
   attn_mask = batch['attention_mask'].to(device)
   input_ids = batch['input_ids'].to(device)
   return input_ids, attn_mask, eval_context_size
+
+
+def compute_diversity_metrics(texts: List[str], n: int = 4) -> dict:
+    """Compute diversity metrics for a list of texts.
+    
+    Args:
+        texts: List of text samples
+        n: N-gram size for diversity metrics (default: 4)
+    
+    Returns:
+        Dictionary containing diversity metrics
+    """
+    print(f"Computing distinct-{n} diversity metric...")
+    
+    # N-gram diversity: ratio of unique n-grams to total n-grams (higher = more diverse)
+    score = float(ngram_diversity_score(texts, num_n=n))
+    
+    return {"distinct_n": score}
 
 
 def get_num_devices(cfg):
@@ -222,6 +269,10 @@ def main(cfg):
     
     print(f"Loaded {len(texts)} samples")
     
+    # Compute diversity metrics with n=4
+    diversity_n = cfg.get("diversity_n", 4)
+    diversity_metrics = compute_diversity_metrics(texts, n=diversity_n)
+    
     # Determine number of devices
     num_devices = get_num_devices(cfg)
     
@@ -320,6 +371,9 @@ def main(cfg):
         "first_chunk_only": bool(cfg.first_chunk_only),
         "num_samples": len(texts),
         "num_devices": num_devices,
+        # Diversity metrics (n=4 by default)
+        "diversity_n": diversity_n,
+        **diversity_metrics,
     }
 
     print(json.dumps(metrics, indent=2))
