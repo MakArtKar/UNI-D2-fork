@@ -1,0 +1,10 @@
+# @package _global_
+
+defaults:
+  - mdlm
+  - override /sampling: starshape
+
+t_on: 0.1
+remasker_schedule: default
+
+samples_path: ${base_samples_path}/starshape_t_on_${t_on}_remasker_schedule_${remasker_schedule}_len_${max_length}.pt

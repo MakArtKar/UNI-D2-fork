@@ -33,6 +33,7 @@ datasets/
 
 # Model outputs and checkpoints
 outputs/
+multirun/
 *.ckpt
 *.pth
 *.pt
