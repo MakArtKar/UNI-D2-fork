@@ -7,7 +7,7 @@ cd "${REPO_ROOT}"
 export PYTHONPATH=src
 
 # Pretrained MDLM checkpoint to load as frozen backbone
-MDLM_CHECKPOINT="${REPO_ROOT}/outputs/mdlm_finetune_len128/checkpoints/6-100000.ckpt"
+MDLM_CHECKPOINT="${REPO_ROOT}/outputs/owt/mdlm_finetune_len256/dummy_checkpoints/checkpoints/best.ckpt"
 
 if [ ! -f "$MDLM_CHECKPOINT" ]; then
     echo "Error: MDLM checkpoint not found at $MDLM_CHECKPOINT"
@@ -21,9 +21,10 @@ python -u -m discrete_diffusion \
     data.wrap=False \
     data.cache_dir=/home/ubuntu/.cache/huggingface/datasets \
     model=small \
-    model.length=128 \
+    model.length=${MAX_LENGTH} \
     algo=gstar \
     sampling=gstar \
+    ++sampling.remasker_schedule=plato \
     training.finetune_path="$MDLM_CHECKPOINT" \
     ++training.strict_load=False \
     training.torch_compile=false \
@@ -44,7 +45,7 @@ python -u -m discrete_diffusion \
     callbacks.sample_saver.enabled=false \
     checkpointing.resume_from_ckpt=false \
     wandb.project="gstar" \
-    wandb.name="gstar_owt_len128" \
-    hydra.run.dir=./outputs/owt/gstar_len128
+    wandb.name="gstar_owt_len${MAX_LENGTH}" \
+    hydra.run.dir=./outputs/owt/gstar_len${MAX_LENGTH}
 
 
