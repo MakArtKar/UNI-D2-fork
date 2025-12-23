@@ -1,6 +1,6 @@
 samples_path: ???  # Required: path to samples (.pt, .npz, .json)
 model_tokenizer: gpt2  # Tokenizer used by diffusion model to generate samples
-pretrained_model: google/gemma-2-9b  # Eval LM
+pretrained_model: gpt2  # Eval LM gpt2 or google/gemma-2-9b
 batch_size: 4
 max_length: 512
 retokenize: true       # Re-tokenize with eval model's tokenizer
