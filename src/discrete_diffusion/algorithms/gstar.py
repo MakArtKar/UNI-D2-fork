@@ -1,5 +1,8 @@
 """GStar: Training a remasker to detect MDLM prediction errors."""
 
+import itertools
+from copy import deepcopy
+
 import torch
 import torch.nn.functional as F
 
@@ -26,11 +29,28 @@ class GStar(MDLM):
     def __init__(self, config, tokenizer):
         super().__init__(config, tokenizer)
         
-        # Freeze MDLM backbone and noise schedule
+        # Store freeze_backbone config
+        self.freeze_backbone = config.algo.freeze_backbone
+        
+        # Always freeze MDLM backbone (used for forward pass to get log_x_theta)
         for param in self.backbone.parameters():
             param.requires_grad = False
         for param in self.noise.parameters():
             param.requires_grad = False
+        
+        # Create remasker backbone:
+        # - If freeze_backbone=True: share with MDLM backbone (no extra params)
+        # - If freeze_backbone=False: clone backbone for remasker (separate trainable copy)
+        if self.freeze_backbone:
+            self.remasker_backbone = self.backbone  # Same object, frozen
+        else:
+            self.remasker_backbone = deepcopy(self.backbone)  # Separate trainable copy
+            # Re-enable gradients (backbone was frozen before deepcopy)
+            for param in self.remasker_backbone.parameters():
+                param.requires_grad = True
+            # Freeze only output_layer (we use remasker_head instead)
+            for param in self.remasker_backbone.output_layer.parameters():
+                param.requires_grad = False
         
         # Initialize remasker head (binary classification)
         hidden_size = config.model.hidden_size
@@ -73,14 +93,36 @@ class GStar(MDLM):
         self.log_dict(metrics, on_step=False, on_epoch=True, sync_dist=True)
         
     def _get_parameters(self):
-        """Only return remasker_head parameters for optimization."""
-        return self.remasker_head.parameters()
+        """Return parameters for optimization based on freeze_backbone config."""
+        if self.freeze_backbone:
+            return self.remasker_head.parameters()
+        else:
+            # Train remasker_backbone (excluding output_layer) + remasker_head
+            remasker_backbone_params = [
+                p for name, p in self.remasker_backbone.named_parameters()
+                if not name.startswith('output_layer.') and p.requires_grad
+            ]
+            return itertools.chain(
+                remasker_backbone_params,
+                self.remasker_head.parameters()
+            )
+    
+    def forward(self, xt, sigma, group_idxs=None):
+        """Override parent forward for MDLM predictions.
+        
+        When freeze_backbone=True, use no_grad since we don't need backbone gradients.
+        When freeze_backbone=False, allow gradients so DDP sees the parameters as used.
+        (The actual gradient flow to loss happens via _remasker_forward, but DDP
+        tracks usage during forward().)
+        """
+        with torch.no_grad():
+            return super().forward(xt, sigma, group_idxs)
     
     def _remasker_forward(self, sampled_x0, sigma):
         """Forward pass that returns remasker logits.
         
-        Takes MDLM's sampled predictions, passes them through the frozen
-        backbone to get hidden states, then through the remasker head.
+        Takes MDLM's sampled predictions, passes them through the remasker_backbone
+        to get hidden states, then through the remasker head.
         
         Args:
             sampled_x0: Sampled tokens from MDLM [batch, seq_len]
@@ -92,16 +134,17 @@ class GStar(MDLM):
         # Process sigma same way as parent class
         sigma_processed = self._process_sigma(sigma)
         
-        # Get hidden states from frozen backbone by passing sampled_x0 through it
-        with torch.no_grad():
+        # Get hidden states from remasker_backbone
+        # When freeze_backbone=True, remasker_backbone is same as backbone (frozen)
+        # When freeze_backbone=False, remasker_backbone is a separate trainable copy
+        context = torch.no_grad() if self.freeze_backbone else torch.enable_grad()
+        with context:
             with torch.amp.autocast('cuda', dtype=torch.float32):
-                hidden_states = self.backbone(sampled_x0, sigma_processed, return_hidden_states=True)
-        
-        # Get time conditioning for remasker head (if needed)
-        if self.backbone.causal:
-            t_cond = None
-        else:
-            t_cond = F.silu(self.backbone.sigma_map(sigma_processed))
+                hidden_states = self.remasker_backbone(sampled_x0, sigma_processed, return_hidden_states=True)
+            if self.remasker_backbone.causal:
+                t_cond = None
+            else:
+                t_cond = F.silu(self.remasker_backbone.sigma_map(sigma_processed))
         
         # Apply remasker head (trainable)
         with torch.amp.autocast('cuda', dtype=torch.bfloat16):

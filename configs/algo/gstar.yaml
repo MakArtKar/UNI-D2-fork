@@ -4,3 +4,4 @@ defaults:
 # Override only what's different
 _target_: discrete_diffusion.algorithms.gstar.GStar
 name: gstar
+freeze_backbone: True

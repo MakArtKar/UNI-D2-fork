@@ -8,13 +8,25 @@ export PYTHONPATH=src
 
 # Pretrained MDLM checkpoint to load as frozen backbone
 MDLM_CHECKPOINT="${REPO_ROOT}/outputs/owt/mdlm_finetune_len${MAX_LENGTH}/dummy_checkpoints/checkpoints/best.ckpt"
+TIME_CONDITIONING="${TIME_CONDITIONING:-false}"
+FREEZE_BACKBONE="${FREEZE_BACKBONE:-true}"
 
 if [ ! -f "$MDLM_CHECKPOINT" ]; then
     echo "Error: MDLM checkpoint not found at $MDLM_CHECKPOINT"
     exit 1
 fi
 
-echo "Training GStar with frozen MDLM from: $MDLM_CHECKPOINT"
+name_suffix=""
+if [ "$TIME_CONDITIONING" == "true" ]; then
+    name_suffix+="_time_conditioning"
+fi
+if [ "$FREEZE_BACKBONE" == "false" ]; then
+    name_suffix+="_finetune_backbone"
+fi
+
+echo "Running in gstar_len${MAX_LENGTH}${name_suffix}"
+
+echo "Training GStar with MDLM from: $MDLM_CHECKPOINT, time conditioning: $TIME_CONDITIONING, freeze backbone: $FREEZE_BACKBONE"
 
 python -u -m discrete_diffusion \
     data=openwebtext-split \
@@ -23,8 +35,12 @@ python -u -m discrete_diffusion \
     model=small \
     model.length=${MAX_LENGTH} \
     algo=gstar \
+    algo.time_conditioning="$TIME_CONDITIONING" \
+    algo.freeze_backbone="$FREEZE_BACKBONE" \
     sampling=gstar \
     ++sampling.remasker_schedule=plato \
+    ++sampling.t_on=1 \
+    ++sampling.t_off=0 \
     training.finetune_path="$MDLM_CHECKPOINT" \
     ++training.strict_load=False \
     training.torch_compile=false \
@@ -45,7 +61,7 @@ python -u -m discrete_diffusion \
     callbacks.sample_saver.enabled=false \
     checkpointing.resume_from_ckpt=false \
     wandb.project="gstar" \
-    wandb.name="gstar_owt_len${MAX_LENGTH}" \
-    hydra.run.dir=./outputs/owt/gstar_len${MAX_LENGTH}
+    wandb.name="gstar_owt_len${MAX_LENGTH}${name_suffix}" \
+    hydra.run.dir=./outputs/owt/gstar_len${MAX_LENGTH}${name_suffix}
 
 
