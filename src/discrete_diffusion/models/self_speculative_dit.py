@@ -111,7 +111,11 @@ class SelfSpeculativeDIT(DIT):
         return torch.stack(permutations)
     
     def _build_causal_input(self, hidden_states, x0_draft, permutation):
-        """Build input for causal layers."""
+        """Build input for causal layers.
+        
+        Returns:
+            causal_input: Projected input for causal layers [B, S, D].
+        """
         batch_size, seq_len, hidden_size = hidden_states.shape
         device = hidden_states.device
         
@@ -138,7 +142,16 @@ class SelfSpeculativeDIT(DIT):
         return self.causal_input_proj(causal_input)
     
     def _target_forward(self, x0_draft, draft_hidden_states, sigma, permutation):
-        """Target forward through causal layers + target head."""
+        """Target forward through causal layers + target head.
+        
+        Includes residual connection from draft hidden states to causal output,
+        allowing causal layers to learn corrections rather than full representations.
+        
+        Key: Residual is added in ORIGINAL order to maintain position correspondence:
+        - hidden_original[j] = causal output for original position j
+        - draft_hidden_states[j] = draft hidden for original position j
+        - Both correspond to the same position j
+        """
         causal_input = self._build_causal_input(draft_hidden_states, x0_draft, permutation)
         
         # Use sigma directly like parent DIT does (no processing)
@@ -153,16 +166,25 @@ class SelfSpeculativeDIT(DIT):
         with torch.amp.autocast('cuda', dtype=torch.bfloat16):
             for layer in self.causal_layers:
                 hidden = layer(hidden, rotary_cos_sin)
-            target_logits = self.target_head(hidden, c=t_cond)
+            
+            # Reorder causal output back to original order BEFORE adding residual
+            batch_size, seq_len, hidden_size = hidden.shape
+            inv_perm = torch.zeros_like(permutation)
+            batch_idx = torch.arange(batch_size, device=permutation.device).unsqueeze(1).expand_as(permutation)
+            inv_perm[batch_idx, permutation] = torch.arange(seq_len, device=permutation.device).unsqueeze(0).expand(batch_size, -1)
+            
+            inv_perm_expanded = inv_perm.unsqueeze(-1).expand(-1, -1, hidden_size)
+            hidden_original = torch.gather(hidden, 1, inv_perm_expanded)
+            
+            # Residual connection in ORIGINAL order - maintains position correspondence
+            # hidden_original[j] corresponds to original position j
+            # draft_hidden_states[j] corresponds to original position j
+            hidden_with_residual = hidden_original + draft_hidden_states
+            
+            target_logits = self.target_head(hidden_with_residual, c=t_cond)
         
-        # Reorder back to original position order
-        batch_size, seq_len, vocab_size = target_logits.shape
-        inv_perm = torch.zeros_like(permutation)
-        batch_idx = torch.arange(batch_size, device=permutation.device).unsqueeze(1).expand_as(permutation)
-        inv_perm[batch_idx, permutation] = torch.arange(seq_len, device=permutation.device).unsqueeze(0).expand(batch_size, -1)
-        
-        inv_perm_expanded = inv_perm.unsqueeze(-1).expand(-1, -1, vocab_size)
-        return torch.gather(target_logits, 1, inv_perm_expanded)
+        # Already in original order - no need to reorder
+        return target_logits
     
     def forward(self, x, sigma, mode: Literal["draft", "target", "full"] = "full",
                 return_hidden_states: bool = False,

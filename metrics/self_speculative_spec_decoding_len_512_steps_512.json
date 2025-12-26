@@ -1,0 +1,1 @@
+{"file": "self_speculative_spec_decoding_len_512_steps_512", "pretrained_model": "gpt2-large", "median_nll": 2.2005503177642822, "avg_nll": 2.847481847800774, "ppl": 17.244303340421546, "acc": 0.3999592462764039, "tokens": 2542099, "retokenize": true, "first_chunk_only": true, "num_samples": 5000, "num_devices": 8, "diversity_n": 4, "distinct_n": 0.203}
