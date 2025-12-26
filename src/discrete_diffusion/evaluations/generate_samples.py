@@ -78,7 +78,8 @@ def worker_generate(rank, num_devices, samples_per_device, remainder, cfg, check
             checkpoint_path, 
             config=model_config, 
             tokenizer=tokenizer,
-            map_location=device
+            map_location=device,
+            strict=False
         )
         
         model.to(device)

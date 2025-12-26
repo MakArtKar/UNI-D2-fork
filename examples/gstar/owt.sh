@@ -38,9 +38,9 @@ python -u -m discrete_diffusion \
     algo.time_conditioning="$TIME_CONDITIONING" \
     algo.freeze_backbone="$FREEZE_BACKBONE" \
     sampling=gstar \
-    ++sampling.remasker_schedule=plato \
-    ++sampling.t_on=1 \
-    ++sampling.t_off=0 \
+    ++sampling.sampler.remasker_schedule=plato \
+    ++sampling.sampler.t_on=0.55 \
+    ++sampling.sampler.t_off=0.05 \ 
     training.finetune_path="$MDLM_CHECKPOINT" \
     ++training.strict_load=False \
     training.torch_compile=false \
