@@ -6,3 +6,26 @@ sampler:
 
 predictor: ddpm
 steps: ${model.length}
+
+# Sampling mode: spec_decoding | draft | target
+# - spec_decoding: Full speculative decoding with draft + target verification
+# - draft: Use draft model only, following MDLM schedule
+# - target: Autoregressive decoding, 1 token at a time in permutation order
+mode: spec_decoding
+
+# Window schedule for spec_decoding mode (see Appendix D of https://arxiv.org/abs/2510.03929)
+# Limits how many tokens can be revealed per step to preserve speculative sampling guarantee
+# - null: No window limit (original behavior, faster but no distribution guarantee)
+# - linear: Window increases from 1 to num_masks (early=careful, late=aggressive)
+# - cosine: Window increases with cosine schedule (slower ramp, more careful early)
+window_schedule: null
+
+# Cosine window parameter Δτ (only used when window_schedule=cosine)
+# Controls max tokens revealed per step (from paper Table 3):
+# - 0.002: ~1 draft/verify step (most AR-like, best quality)
+# - 0.005: ~2 draft/verify steps
+# - 0.01:  ~3 draft/verify steps
+# - 0.02:  ~4 draft/verify steps
+# - 0.083: ~10 draft/verify steps (most parallel, fastest)
+# - null:  Use full num_masks as max window
+cosine_delta_t: null

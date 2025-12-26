@@ -5,4 +5,4 @@ defaults:
   - override /sampling: self_speculative
 
 checkpoint_path: outputs/owt/self_speculative_len${max_length}/dummy_checkpoints/checkpoints/best.ckpt
-samples_path: ${base_samples_path}/self_speculative_len_${max_length}_steps_${num_steps}.pt
+samples_path: ${base_samples_path}/self_speculative_${sampling.mode}_len_${max_length}_steps_${num_steps}.pt

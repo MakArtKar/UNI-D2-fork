@@ -1,0 +1,1 @@
+{"file": "self_speculative_spec_decoding_cosine_dt0.05_len_128_steps_128", "pretrained_model": "gpt2-large", "median_nll": 2.995990514755249, "avg_nll": 3.6822892262763767, "ppl": 39.73725760355717, "acc": 0.32529852097699813, "tokens": 623993, "retokenize": true, "first_chunk_only": true, "num_samples": 5000, "num_devices": 8, "diversity_n": 4, "distinct_n": 0.377}
