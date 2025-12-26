@@ -1,0 +1,7 @@
+defaults:
+  - mdlm
+
+_target_: discrete_diffusion.algorithms.self_speculative_mdlm.SelfSpeculativeMDLM
+name: self_speculative_mdlm
+backbone: self_speculative_dit
+num_causal_layers: 1

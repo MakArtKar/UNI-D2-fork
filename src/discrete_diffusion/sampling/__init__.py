@@ -9,6 +9,7 @@ from .bd3lm import BD3LMSampler
 from .gidd import GIDDSampler
 from .gstar import GStarSampler
 from .partition import PartitionSampler
+from .self_speculative import SelfSpeculativeSampler
 from .starshape import StarShapeSampler
 from .uniform import UniformSampler
 
@@ -20,6 +21,7 @@ __all__ = [
   "GIDDSampler",
   "GStarSampler",
   "PartitionSampler",
+  "SelfSpeculativeSampler",
   "StarShapeSampler",
   "UniformSampler",
 ]

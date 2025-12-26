@@ -15,7 +15,7 @@ class AbsorbingSampler(Sampler):
     self.config = config
     self.forward_process = forward_process
 
-  def _sample_x0(self, model, x, t, p_x0=None):
+  def _sample_x0(self, model, x, t, p_x0=None, forward_method=None):
     """Sample x0 from model predictions.
     
     Args:
@@ -23,6 +23,7 @@ class AbsorbingSampler(Sampler):
       x: Current sequence [batch, length].
       t: Current timestep [batch, 1].
       p_x0: Optional cached probability distribution over x0.
+      forward_method: Optional custom forward callable. If None, uses model.forward.
       
     Returns:
       p_x0: Probability distribution over x0 [batch, length, vocab].
@@ -30,8 +31,14 @@ class AbsorbingSampler(Sampler):
     """
     if p_x0 is None:
       alpha_t = model.noise.alpha_t(t)
-      log_p_x0 = model.forward(
-        x, model._sigma_from_alphat(alpha_t))
+      sigma = model._sigma_from_alphat(alpha_t)
+      
+      # Use custom forward method if provided
+      if forward_method is not None:
+        log_p_x0 = forward_method(x, sigma)
+      else:
+        log_p_x0 = model.forward(x, sigma)
+      
       if self.config.sampling.use_float64:
         log_p_x0 = log_p_x0.to(torch.float64)
       p_x0 = log_p_x0.exp()
@@ -68,7 +75,12 @@ class AbsorbingSampler(Sampler):
     return out
 
   def compute_posterior(self, model, x, t, dt, p_x0=None,
-                        noise_removal_step=False):
+                        noise_removal_step=False, forward_method=None):
+    """Compute posterior with optional custom forward method.
+    
+    Args:
+      forward_method: Optional custom forward callable for _sample_x0.
+    """
     alpha_t = model.noise.alpha_t(t)
     if noise_removal_step:
       alpha_s = torch.ones_like(alpha_t)
@@ -76,7 +88,7 @@ class AbsorbingSampler(Sampler):
       alpha_s = model.noise.alpha_t(t - dt)
     assert alpha_t.ndim == 2
     
-    p_x0, sampled_x0 = self._sample_x0(model, x, t, p_x0)
+    p_x0, sampled_x0 = self._sample_x0(model, x, t, p_x0, forward_method=forward_method)
     out = self._mask_tokens_mdlm(model, x, sampled_x0, alpha_t, alpha_s)
     return p_x0, out
 
@@ -93,6 +105,12 @@ class AbsorbingSampler(Sampler):
     dt = (1 - eps) / num_steps
     p_x0_cache = None
     predictor = self.config.sampling.predictor
+    
+    # NFE tracking: track when each sample first reaches 0 masks
+    track_nfe = self.config.sampling.get("nfe_metric", False)
+    if track_nfe:
+      # nfe_steps[i] = step when sample i first had 0 masks (-1 if not yet)
+      nfe_steps = torch.full((num_samples,), -1, dtype=torch.long, device=model.device)
 
     for i in range(num_steps):
       t = timesteps[i] * torch.ones(
@@ -109,6 +127,14 @@ class AbsorbingSampler(Sampler):
         x = x_next
       else:
         raise ValueError(f'Unsupported predictor: {predictor}')
+      
+      # Track NFE: check which samples just reached 0 masks
+      if track_nfe:
+        num_masks = (x == model.mask_id).sum(dim=1)  # [batch]
+        # Mark samples that just reached 0 masks (and weren't already marked)
+        just_finished = (num_masks == 0) & (nfe_steps == -1)
+        # Step count is i+1 (1-indexed: first step is step 1)
+        nfe_steps = torch.where(just_finished, torch.tensor(i + 1, device=model.device), nfe_steps)
 
     t0 = timesteps[-1] * torch.ones(x.shape[0], 1, device=model.device)
 
@@ -116,5 +142,18 @@ class AbsorbingSampler(Sampler):
       model=model, x=x, t=t0, dt=None,
       p_x0=p_x0_cache,
       noise_removal_step=True)
+    
+    # Final NFE check after noise removal step
+    if track_nfe:
+      num_masks = (x == model.mask_id).sum(dim=1)
+      just_finished = (num_masks == 0) & (nfe_steps == -1)
+      # The noise removal step is the final step: num_steps + 1
+      nfe_steps = torch.where(just_finished, torch.tensor(num_steps + 1, device=model.device), nfe_steps)
+      
+      # For any samples still not finished (shouldn't happen normally), use num_steps + 1
+      nfe_steps = torch.where(nfe_steps == -1, torch.tensor(num_steps + 1, device=model.device), nfe_steps)
+      
+      mean_nfes = nfe_steps.float().mean().item()
+      return x, mean_nfes
 
     return x

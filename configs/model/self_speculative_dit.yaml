@@ -1,0 +1,6 @@
+defaults:
+  - small
+
+_target_: discrete_diffusion.models.self_speculative_dit.SelfSpeculativeDIT
+num_causal_layers: 1
+

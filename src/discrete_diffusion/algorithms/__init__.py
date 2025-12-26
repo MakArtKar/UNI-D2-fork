@@ -21,6 +21,7 @@ from .gstar import GStar  # noqa: F401
 from .mdlm import MDLM  # noqa: F401
 from .partition_mdlm import PartitionMDLM  # noqa: F401
 from .sedd import SEDD  # noqa: F401
+from .self_speculative_mdlm import SelfSpeculativeMDLM  # noqa: F401
 from .udlm import UDLM  # noqa: F401
 
 __all__ = [
@@ -32,5 +33,6 @@ __all__ = [
   'MDLM',
   'PartitionMDLM',
   'SEDD',
+  'SelfSpeculativeMDLM',
   'UDLM',
 ]

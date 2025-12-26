@@ -1,0 +1,8 @@
+defaults:
+  - default
+
+sampler:
+  _target_: discrete_diffusion.sampling.self_speculative.SelfSpeculativeSampler
+
+predictor: ddpm
+steps: ${model.length}

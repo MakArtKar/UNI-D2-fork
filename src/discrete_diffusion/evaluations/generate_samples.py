@@ -6,8 +6,12 @@ used for evaluation (e.g. with generative_ppl.py).
 
 Supports multi-GPU parallel generation by dividing samples across available GPUs.
 Also supports CPU-only generation with device=cpu.
+
+If sampling.nfe_metric=True, tracks and saves mean NFE (number of function evaluations)
+per sample - i.e., the step at which each sample first reached 0 mask tokens.
 """
 
+import json
 import hydra
 import torch
 import torch.multiprocessing as mp
@@ -64,7 +68,7 @@ def worker_generate(rank, num_devices, samples_per_device, remainder, cfg, check
         num_samples_this_device = samples_per_device + (1 if rank < remainder else 0)
         
         if num_samples_this_device == 0:
-            return_dict[rank] = torch.tensor([], dtype=torch.long)
+            return_dict[rank] = {'samples': torch.tensor([], dtype=torch.long), 'nfe_metrics': []}
             return
         
         device_label = "CPU" if use_cpu else f"Device {rank}"
@@ -94,24 +98,39 @@ def worker_generate(rank, num_devices, samples_per_device, remainder, cfg, check
         batch_size = cfg.batch_size
         num_steps = cfg.num_steps
         
+        # Check if NFE tracking is enabled
+        track_nfe = model_config.sampling.get("nfe_metric", False)
+        
         all_samples = []
+        all_nfe_metrics = []
         
         # Generate samples for this device
         samples_generated = 0
         while samples_generated < num_samples_this_device:
             current_batch_size = min(batch_size, num_samples_this_device - samples_generated)
             
-            samples = model.generate_samples(
+            result = model.generate_samples(
                 num_samples=current_batch_size,
                 num_steps=num_steps
             )
             
+            # Handle both return formats: (samples, mean_nfe) or just samples
+            if track_nfe and isinstance(result, tuple):
+                samples, mean_nfe = result
+                all_nfe_metrics.append(mean_nfe)
+            else:
+                samples = result
+            
             all_samples.append(samples.detach().cpu())
             samples_generated += current_batch_size
         
-        result = torch.cat(all_samples, dim=0) if all_samples else torch.tensor([], dtype=torch.long)
-        print(f"[{device_label}] Generated {len(result)} samples")
-        return_dict[rank] = result
+        result_samples = torch.cat(all_samples, dim=0) if all_samples else torch.tensor([], dtype=torch.long)
+        print(f"[{device_label}] Generated {len(result_samples)} samples")
+        
+        return_dict[rank] = {
+            'samples': result_samples,
+            'nfe_metrics': all_nfe_metrics
+        }
         
     except Exception as e:
         device_label = "CPU" if use_cpu else f"Device {rank}"
@@ -207,6 +226,9 @@ def main(cfg):
     # Free memory from checkpoint loading
     del ckpt
     
+    # Check if NFE tracking is enabled
+    track_nfe = model_config.sampling.get("nfe_metric", False)
+    
     if num_devices == 1:
         # Single device mode - no multiprocessing needed
         if use_cpu:
@@ -217,7 +239,7 @@ def main(cfg):
         return_dict = manager.dict()
         worker_generate(0, 1, samples_per_device, remainder, cfg, checkpoint_path, 
                        model_config, tokenizer, return_dict, use_cpu=use_cpu)
-        all_samples = [return_dict[0]]
+        worker_results = [return_dict[0]]
     else:
         # Multi-GPU mode using multiprocessing
         print("Spawning worker processes...")
@@ -241,12 +263,19 @@ def main(cfg):
             p.join()
         
         # Collect results in order
-        all_samples = []
+        worker_results = []
         for rank in range(num_devices):
             if return_dict.get(rank) is None:
                 raise RuntimeError(f"Worker on device {rank} failed to generate samples")
-            if len(return_dict[rank]) > 0:
-                all_samples.append(return_dict[rank])
+            worker_results.append(return_dict[rank])
+    
+    # Extract samples and NFE metrics from worker results
+    all_samples = []
+    all_nfe_metrics = []
+    for result in worker_results:
+        if len(result['samples']) > 0:
+            all_samples.append(result['samples'])
+        all_nfe_metrics.extend(result['nfe_metrics'])
     
     # Concatenate all samples
     if all_samples:
@@ -266,6 +295,30 @@ def main(cfg):
     
     torch.save(all_samples, out_path)
     print(f"Saved {len(all_samples)} samples to {out_path}")
+    
+    # Compute and save NFE metrics if tracking is enabled
+    if track_nfe and all_nfe_metrics:
+        # Compute overall mean NFE across all batches
+        mean_nfe = sum(all_nfe_metrics) / len(all_nfe_metrics)
+        print(f"Mean NFE (steps to complete generation): {mean_nfe:.2f}")
+        
+        # Save NFE metrics to JSON (same pattern as generative_ppl.py)
+        nfe_metrics = {
+            "file": out_path.stem,
+            "mean_nfe": float(mean_nfe),
+            "num_samples": len(all_samples),
+            "num_steps": cfg.num_steps,
+            "batch_nfes": all_nfe_metrics,
+        }
+        
+        # Replace samples/ with metrics/ in path and change extension to .json
+        metrics_path_str = str(out_path).replace('samples/', 'metrics/', 1)
+        metrics_path = Path(metrics_path_str).with_suffix(".json")
+        metrics_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(metrics_path, 'w') as f:
+            json.dump(nfe_metrics, f, indent=2)
+        print(f"Saved NFE metrics to {metrics_path}")
 
     if cfg.get("save_text", False):
         print("Decoding samples to text...")

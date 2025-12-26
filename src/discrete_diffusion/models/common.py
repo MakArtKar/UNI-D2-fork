@@ -470,6 +470,10 @@ class DDiTBlockCausal(nn.Module):
       # Fallback to SDPA
       qkv_rotary = apply_rotary_pos_emb_torchscript(qkv, cos, sin)
       q, k, v = qkv_rotary.chunk(3, dim=2)
+      # Squeeze the chunked dimension (dim=2) to get [B, S, H, D] from [B, S, 1, H, D]
+      q = q.squeeze(2)
+      k = k.squeeze(2)
+      v = v.squeeze(2)
       return sdpa_attention(q, k, v, causal=True, dropout_p=0.0)
 
   def forward(self, x, rotary_cos_sin, **kwargs):
