@@ -11,9 +11,10 @@ from .base import Sampler
 class AbsorbingSampler(Sampler):
   """Sampler that mirrors Diffusion.generate_samples() for absorbing models."""
 
-  def __init__(self, config, forward_process=None):
+  def __init__(self, config, forward_process=None, diffusion_temperature=1):
     self.config = config
     self.forward_process = forward_process
+    self.diffusion_temperature = diffusion_temperature
 
   def _sample_x0(self, model, x, t, p_x0=None):
     """Sample x0 from model predictions.
@@ -34,7 +35,7 @@ class AbsorbingSampler(Sampler):
         x, model._sigma_from_alphat(alpha_t))
       if self.config.sampling.use_float64:
         log_p_x0 = log_p_x0.to(torch.float64)
-      p_x0 = log_p_x0.exp()
+      p_x0 = log_p_x0.exp() / self.diffusion_temperature
     
     sampled_x0 = sample_categorical(p_x0)
     return p_x0, sampled_x0

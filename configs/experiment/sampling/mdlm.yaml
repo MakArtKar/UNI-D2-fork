@@ -1,5 +1,8 @@
 # @package _global_
 
+defaults:
+  - override /sampling: default
+
 base_samples_path: samples
 
 max_length: ???
