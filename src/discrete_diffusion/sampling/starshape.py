@@ -38,8 +38,9 @@ class StarShapeSampler(AbsorbingSampler):
   """
 
   def __init__(self, config, forward_process=None, t_on=0.55, t_off=0.05,
-               remasker_schedule: Literal["default", "plato"] = "default"):
-    super().__init__(config, forward_process)
+               remasker_schedule: Literal["default", "plato"] = "default",
+               diffusion_temperature=1):
+    super().__init__(config, forward_process, diffusion_temperature=diffusion_temperature)
     self.t_on = t_on
     self.t_off = t_off
     self.remasker_schedule = remasker_schedule

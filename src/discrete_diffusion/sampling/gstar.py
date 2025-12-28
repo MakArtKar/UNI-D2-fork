@@ -27,8 +27,12 @@ class GStarSampler(StarShapeSampler):
           "default": Mask ratio continues decreasing following MDLM schedule.
           "plato": Mask ratio uses rescaled time for smooth schedule continuation.
   """
-  def __init__(self, *args, remasker_temperature: float = 1, **kwargs):
-    super().__init__(*args, **kwargs)
+  def __init__(self, config, forward_process=None, t_on=0.55, t_off=0.05,
+               remasker_schedule="default", diffusion_temperature=1,
+               remasker_temperature: float = 1):
+    super().__init__(config, forward_process, t_on=t_on, t_off=t_off,
+                     remasker_schedule=remasker_schedule,
+                     diffusion_temperature=diffusion_temperature)
     self.remasker_temperature = remasker_temperature
 
   def _get_mistake_confidences(self, model, sampled_x0, t):
