@@ -390,11 +390,21 @@ class TrainerBase(L.LightningModule):
     return None
 
   @torch.no_grad()
-  def generate_samples(self, num_samples, num_steps=None, eps=None):
+  def generate_samples(self, num_samples, num_steps=None, eps=None, return_trajectory=False):
     """Generate samples from the model using the new sampler system.
     
     Subclasses should not need to override this method if they have a 
     corresponding Sampler implementation registered in the sampling registry.
+    
+    Args:
+        num_samples: Number of samples to generate.
+        num_steps: Number of denoising steps.
+        eps: Small epsilon for numerical stability.
+        return_trajectory: If True, also return intermediate states.
+        
+    Returns:
+        If return_trajectory=False: Generated samples tensor.
+        If return_trajectory=True: Tuple of (samples, trajectory_list).
     """
     if num_steps is None:
       num_steps = self.config.sampling.steps
@@ -409,7 +419,8 @@ class TrainerBase(L.LightningModule):
         "Set 'sampling.sampler._target_' or 'algo.sampler._target_' in the config "
         "to select a Sampler, or override generate_samples().")
     
-    return sampler.generate(model=self, num_samples=num_samples, num_steps=num_steps, eps=eps, inject_bos=inject_bos)
+    return sampler.generate(model=self, num_samples=num_samples, num_steps=num_steps, 
+                           eps=eps, inject_bos=inject_bos, return_trajectory=return_trajectory)
 
   def _process_model_input(self, x0, valid_tokens):
     raise NotImplementedError

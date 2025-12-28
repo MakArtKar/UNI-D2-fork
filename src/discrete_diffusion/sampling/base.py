@@ -15,7 +15,7 @@ class Sampler(ABC):
 
   @abstractmethod
   def generate(self, model: Any, *, num_samples: int, num_steps: int, eps: float,
-               inject_bos: bool) -> Any:
+               inject_bos: bool, return_trajectory: bool = False) -> Any:
     """Generate new samples from the provided model.
     
     Args:
@@ -24,9 +24,11 @@ class Sampler(ABC):
         num_steps: Number of sampling steps.
         eps: Small epsilon for numerical stability or time bounds.
         inject_bos: Whether to inject a Beginning-Of-Sequence token.
+        return_trajectory: If True, also return list of intermediate states.
         
     Returns:
-        Tensor: Generated samples.
+        If return_trajectory=False: Tensor of generated samples.
+        If return_trajectory=True: Tuple of (samples, trajectory_list).
     """
     raise NotImplementedError
 

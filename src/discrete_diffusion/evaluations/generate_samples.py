@@ -28,8 +28,61 @@ def get_num_devices(cfg):
     return 1
 
 
+def save_trajectories(trajectories, samples_path, tokenizer, num_samples):
+    """Save trajectory data in both tensor and text formats.
+    
+    Args:
+        trajectories: Tensor of shape [num_steps, num_samples, seq_len] containing
+                     token ids at each diffusion step.
+        samples_path: Path to the samples file (used to derive trajectory path).
+        tokenizer: Tokenizer for decoding tokens to text.
+        num_samples: Number of samples to save in text format.
+    """
+    print("Saving trajectories...")
+    
+    # Compute trajectory path (similar to metrics path in generative_ppl.py)
+    traj_path = Path(samples_path.replace('samples/', 'trajectories/', 1))
+    traj_path = Path(hydra.utils.to_absolute_path(str(traj_path)))
+    traj_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Save as .pt file
+    traj_pt_path = traj_path.with_suffix('.pt')
+    torch.save(trajectories, traj_pt_path)
+    print(f"Saved trajectories tensor to {traj_pt_path}")
+    print(f"  Shape: {trajectories.shape} (steps, samples, sequence_length)")
+    
+    # Save as text file - decode each step for each sample
+    traj_txt_path = traj_path.with_suffix('.txt')
+    num_steps_total, num_samples_traj, seq_len = trajectories.shape
+    
+    with open(traj_txt_path, 'w', encoding='utf-8') as f:
+        for sample_idx in range(min(num_samples_traj, num_samples)):
+            f.write(f"{'='*80}\n")
+            f.write(f"SAMPLE {sample_idx}\n")
+            f.write(f"{'='*80}\n\n")
+            
+            for step_idx in range(num_steps_total):
+                step_tokens = trajectories[step_idx, sample_idx, :].unsqueeze(0)
+                step_text = tokenizer.batch_decode(step_tokens, skip_special_tokens=False)[0]
+                
+                # Show step number (0 = initial, last = final)
+                if step_idx == 0:
+                    step_label = "Initial (masked)"
+                elif step_idx == num_steps_total - 1:
+                    step_label = "Final (denoised)"
+                else:
+                    step_label = f"Step {step_idx}"
+                
+                f.write(f"--- {step_label} ---\n")
+                f.write(f"{step_text}\n\n")
+            
+            f.write("\n")
+    
+    print(f"Saved trajectory texts to {traj_txt_path}")
+
+
 def worker_generate(rank, num_devices, samples_per_device, remainder, cfg, checkpoint_path, 
-                    model_config, tokenizer, return_dict, use_cpu=False):
+                    model_config, tokenizer, return_dict, use_cpu=False, return_trajectory=False):
     """Worker function for generating samples on a specific GPU or CPU.
     
     Args:
@@ -43,6 +96,7 @@ def worker_generate(rank, num_devices, samples_per_device, remainder, cfg, check
         tokenizer: Tokenizer instance
         return_dict: Shared dict for returning results
         use_cpu: Whether to use CPU instead of GPU
+        return_trajectory: Whether to return intermediate states
     """
     try:
         if use_cpu:
@@ -96,23 +150,41 @@ def worker_generate(rank, num_devices, samples_per_device, remainder, cfg, check
         num_steps = cfg.num_steps
         
         all_samples = []
+        all_trajectories = [] if return_trajectory else None
         
         # Generate samples for this device
         samples_generated = 0
         while samples_generated < num_samples_this_device:
             current_batch_size = min(batch_size, num_samples_this_device - samples_generated)
             
-            samples = model.generate_samples(
+            result = model.generate_samples(
                 num_samples=current_batch_size,
-                num_steps=num_steps
+                num_steps=num_steps,
+                return_trajectory=return_trajectory
             )
             
-            all_samples.append(samples.detach().cpu())
+            if return_trajectory:
+                samples, trajectory = result
+                all_samples.append(samples.detach().cpu())
+                # trajectory is a list of tensors, each [batch, length]
+                # Convert to [num_steps+2, batch, length] then move to CPU
+                traj_tensor = torch.stack(trajectory, dim=0).detach().cpu()
+                all_trajectories.append(traj_tensor)
+            else:
+                all_samples.append(result.detach().cpu())
+            
             samples_generated += current_batch_size
         
         result = torch.cat(all_samples, dim=0) if all_samples else torch.tensor([], dtype=torch.long)
         print(f"[{device_label}] Generated {len(result)} samples")
-        return_dict[rank] = result
+        
+        if return_trajectory:
+            # Concatenate trajectories along batch dimension
+            # Each trajectory is [num_steps+2, batch, length], concat on dim=1
+            combined_trajectories = torch.cat(all_trajectories, dim=1) if all_trajectories else None
+            return_dict[rank] = {'samples': result, 'trajectories': combined_trajectories}
+        else:
+            return_dict[rank] = result
         
     except Exception as e:
         device_label = "CPU" if use_cpu else f"Device {rank}"
@@ -208,6 +280,11 @@ def main(cfg):
     # Free memory from checkpoint loading
     del ckpt
     
+    # Check if trajectory tracking is enabled
+    return_trajectory = cfg.get("return_trajectory", False)
+    if return_trajectory:
+        print("Trajectory tracking enabled - will save intermediate states")
+    
     if num_devices == 1:
         # Single device mode - no multiprocessing needed
         if use_cpu:
@@ -217,8 +294,9 @@ def main(cfg):
         manager = mp.Manager()
         return_dict = manager.dict()
         worker_generate(0, 1, samples_per_device, remainder, cfg, checkpoint_path, 
-                       model_config, tokenizer, return_dict, use_cpu=use_cpu)
-        all_samples = [return_dict[0]]
+                       model_config, tokenizer, return_dict, use_cpu=use_cpu,
+                       return_trajectory=return_trajectory)
+        all_results = [return_dict[0]]
     else:
         # Multi-GPU mode using multiprocessing
         print("Spawning worker processes...")
@@ -232,7 +310,8 @@ def main(cfg):
             p = mp.Process(
                 target=worker_generate,
                 args=(rank, num_devices, samples_per_device, remainder, cfg, 
-                      checkpoint_path, model_config, tokenizer, return_dict, use_cpu)
+                      checkpoint_path, model_config, tokenizer, return_dict, use_cpu,
+                      return_trajectory)
             )
             p.start()
             processes.append(p)
@@ -242,18 +321,46 @@ def main(cfg):
             p.join()
         
         # Collect results in order
-        all_samples = []
+        all_results = []
         for rank in range(num_devices):
             if return_dict.get(rank) is None:
                 raise RuntimeError(f"Worker on device {rank} failed to generate samples")
-            if len(return_dict[rank]) > 0:
-                all_samples.append(return_dict[rank])
+            all_results.append(return_dict[rank])
     
-    # Concatenate all samples
-    if all_samples:
-        all_samples = torch.cat(all_samples, dim=0)
+    # Concatenate all samples and trajectories
+    if return_trajectory:
+        # Extract samples and trajectories from results
+        all_samples = []
+        all_trajectories = []
+        for result in all_results:
+            if result is not None and isinstance(result, dict):
+                if result['samples'] is not None and len(result['samples']) > 0:
+                    all_samples.append(result['samples'])
+                if result['trajectories'] is not None:
+                    all_trajectories.append(result['trajectories'])
+        
+        if all_samples:
+            all_samples = torch.cat(all_samples, dim=0)
+        else:
+            all_samples = torch.tensor([], dtype=torch.long)
+        
+        if all_trajectories:
+            # Each trajectory is [num_steps+2, batch, length], concat on dim=1
+            all_trajectories = torch.cat(all_trajectories, dim=1)
+        else:
+            all_trajectories = None
     else:
-        all_samples = torch.tensor([], dtype=torch.long)
+        # Simple case: results are just tensors
+        all_samples = []
+        for result in all_results:
+            if result is not None and len(result) > 0:
+                all_samples.append(result)
+        
+        if all_samples:
+            all_samples = torch.cat(all_samples, dim=0)
+        else:
+            all_samples = torch.tensor([], dtype=torch.long)
+        all_trajectories = None
     
     print(f"Total samples collected: {len(all_samples)}")
     
@@ -276,6 +383,10 @@ def main(cfg):
             for i, text in enumerate(texts):
                 f.write(f"Sample {i}:\n{text}\n{'-'*80}\n")
         print(f"Saved text samples to {text_path}")
+
+    # Save trajectories if enabled
+    if return_trajectory and all_trajectories is not None:
+        save_trajectories(all_trajectories, cfg.samples_path, tokenizer, num_samples)
 
 
 if __name__ == "__main__":

@@ -12,3 +12,4 @@ device: cpu              # Device type: 'cuda' or 'cpu'
 devices: null             # Number of GPUs to use (null = 1 by default)
 torch_compile: false      # Whether to use torch.compile
 save_text: false          # Whether to save detokenized text samples
+return_trajectory: false  # Whether to save intermediate diffusion states

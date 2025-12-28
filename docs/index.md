@@ -51,9 +51,9 @@ Once you have a checkpoint, use the generation script with a sampling experiment
 ```bash
 PYTHONPATH=src python -m discrete_diffusion.evaluations.generate_samples \
   experiment=sampling/mdlm \
-  checkpoint_path=outputs/owt/mdlm/checkpoints/last.ckpt \
-  device=cuda \
-  devices=8
+  max_length=512 \ # (or any other length)
+  device=cuda \ # or cpu
+  devices=<num devices>
 ```
 
 Also, for generaештп 64 samples and saving text examples
@@ -61,9 +61,9 @@ Also, for generaештп 64 samples and saving text examples
 ```bash
 PYTHONPATH=src python -m discrete_diffusion.evaluations.generate_samples \
   'experiment=[sampling/mdlm,sampling/debug]' \
-  checkpoint_path=outputs/owt/mdlm/checkpoints/last.ckpt \
-  device=cuda \
-  devices=8
+  max_length=512 \ # (or any other length)
+  device=cuda \ # or cpu
+  devices=<num devices>
 ```
 
 ## Extending

@@ -81,7 +81,8 @@ class AbsorbingSampler(Sampler):
     return p_x0, out
 
   @torch.no_grad()
-  def generate(self, model, *, num_samples, num_steps, eps, inject_bos):
+  def generate(self, model, *, num_samples, num_steps, eps, inject_bos,
+               return_trajectory=False):
     if num_steps is None:
       num_steps = self.config.sampling.steps
     x = model.prior_sample(num_samples, model.num_tokens)
@@ -93,6 +94,9 @@ class AbsorbingSampler(Sampler):
     dt = (1 - eps) / num_steps
     p_x0_cache = None
     predictor = self.config.sampling.predictor
+
+    # Track trajectory if requested
+    trajectory = [x.clone()] if return_trajectory else None
 
     for i in range(num_steps):
       t = timesteps[i] * torch.ones(
@@ -110,11 +114,18 @@ class AbsorbingSampler(Sampler):
       else:
         raise ValueError(f'Unsupported predictor: {predictor}')
 
+      if return_trajectory:
+        trajectory.append(x.clone())
+
     t0 = timesteps[-1] * torch.ones(x.shape[0], 1, device=model.device)
 
     _, x = self.compute_posterior(
       model=model, x=x, t=t0, dt=None,
       p_x0=p_x0_cache,
       noise_removal_step=True)
+
+    if return_trajectory:
+      trajectory.append(x.clone())
+      return x, trajectory
 
     return x
