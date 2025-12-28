@@ -8,12 +8,19 @@ Supports multi-GPU parallel generation by dividing samples across available GPUs
 Also supports CPU-only generation with device=cpu.
 """
 
+import math
+
 import hydra
 import torch
 import torch.multiprocessing as mp
 import tqdm
 from pathlib import Path
 from omegaconf import OmegaConf
+from torchvision.utils import make_grid
+from PIL import Image
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 
 from discrete_diffusion.data import get_tokenizer
 
@@ -28,8 +35,109 @@ def get_num_devices(cfg):
     return 1
 
 
-def save_trajectories(trajectories, samples_path, tokenizer, num_samples):
-    """Save trajectory data in both tensor and text formats.
+def create_mask_visualization(trajectories, mask_id, sampler_name="Sampler", padding=4):
+    """Create visualization of masking pattern across diffusion steps.
+    
+    Args:
+        trajectories: Tensor of shape [num_steps, num_samples, seq_len].
+        mask_id: Token ID used for masking.
+        sampler_name: Name of the sampler for the title.
+        padding: Padding between sample images in pixels.
+        
+    Returns:
+        matplotlib Figure with the visualization.
+    """
+    num_steps, num_samples, seq_len = trajectories.shape
+    
+    # Create binary mask: 1 = masked (yellow), 0 = unmasked (purple)
+    # Shape: [num_samples, num_steps, seq_len]
+    is_masked = (trajectories == mask_id).permute(1, 0, 2).float()
+    
+    # Colors: yellow for masked (1), purple for unmasked (0)
+    # Yellow: RGB(255, 255, 0), Purple: RGB(128, 0, 128)
+    yellow = torch.tensor([1.0, 1.0, 0.0])  # Masked
+    purple = torch.tensor([0.5, 0.0, 0.5])  # Unmasked
+    
+    # Create RGB images for each sample
+    # Shape per sample: [3, num_steps, seq_len] (C, H, W) where H=steps, W=positions
+    images = []
+    for sample_idx in range(num_samples):
+        mask = is_masked[sample_idx]  # [num_steps, seq_len]
+        
+        # Create RGB image
+        img = torch.zeros(3, num_steps, seq_len)
+        for c in range(3):
+            img[c] = mask * yellow[c] + (1 - mask) * purple[c]
+        
+        images.append(img)
+    
+    # Stack into batch: [num_samples, 3, num_steps, seq_len]
+    images = torch.stack(images, dim=0)
+    
+    # Use make_grid to combine with white padding
+    # nrow = sqrt(num_samples) for a square-ish grid layout
+    nrow = int(math.sqrt(num_samples))
+    ncol = math.ceil(num_samples / nrow)
+    # pad_value=1.0 creates white padding (both horizontal and vertical)
+    grid = make_grid(images, nrow=nrow, padding=padding, pad_value=1.0)
+    
+    # Convert to numpy for matplotlib
+    # grid shape: [3, H, W], values in [0, 1]
+    grid_np = grid.permute(1, 2, 0).numpy()
+    
+    # Calculate cell dimensions (including padding)
+    cell_width = seq_len + padding
+    cell_height = num_steps + padding
+    
+    # Create matplotlib figure with axes
+    # Adjust figsize for grid layout
+    fig_width = max(12, nrow * seq_len / 40)
+    fig_height = max(8, ncol * num_steps / 25)
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+    
+    ax.imshow(grid_np, aspect='auto')
+    ax.set_xlabel('Position', fontsize=48, fontweight='bold')
+    ax.set_ylabel('Step', fontsize=48, fontweight='bold')
+    ax.set_title(f'{sampler_name} - Decoding Order Visualization', fontsize=59, fontweight='bold')
+    
+    # Create cycled tick labels for X-axis (position)
+    # Each cell starts from 0
+    x_tick_interval = max(1, seq_len // 8)  # ~8 ticks per cell
+    x_ticks = []
+    x_labels = []
+    for col in range(nrow):
+        cell_start = col * cell_width + padding
+        for pos in range(0, seq_len, x_tick_interval):
+            x_ticks.append(cell_start + pos)
+            x_labels.append(str(pos))
+    ax.set_xticks(x_ticks)
+    ax.set_xticklabels(x_labels, fontsize=32)
+    
+    # Create cycled tick labels for Y-axis (step)
+    # Each cell starts from 0
+    y_tick_interval = max(1, num_steps // 8)  # ~8 ticks per cell
+    y_ticks = []
+    y_labels = []
+    for row in range(ncol):
+        cell_start = row * cell_height + padding
+        for step in range(0, num_steps, y_tick_interval):
+            y_ticks.append(cell_start + step)
+            y_labels.append(str(step))
+    ax.set_yticks(y_ticks)
+    ax.set_yticklabels(y_labels, fontsize=32)
+    
+    # Create legend with bigger font
+    yellow_patch = mpatches.Patch(color=(1.0, 1.0, 0.0), label='Masked')
+    purple_patch = mpatches.Patch(color=(0.5, 0.0, 0.5), label='Unmasked')
+    ax.legend(handles=[yellow_patch, purple_patch], loc='upper right', fontsize=43)
+    
+    plt.tight_layout()
+    
+    return fig
+
+
+def save_trajectories(trajectories, samples_path, tokenizer, num_samples, mask_id=None, sampler_name="Sampler"):
+    """Save trajectory data in tensor, text, and visualization formats.
     
     Args:
         trajectories: Tensor of shape [num_steps, num_samples, seq_len] containing
@@ -37,6 +145,8 @@ def save_trajectories(trajectories, samples_path, tokenizer, num_samples):
         samples_path: Path to the samples file (used to derive trajectory path).
         tokenizer: Tokenizer for decoding tokens to text.
         num_samples: Number of samples to save in text format.
+        mask_id: Token ID used for masking (for visualization).
+        sampler_name: Name of the sampler for visualization title.
     """
     print("Saving trajectories...")
     
@@ -79,6 +189,14 @@ def save_trajectories(trajectories, samples_path, tokenizer, num_samples):
             f.write("\n")
     
     print(f"Saved trajectory texts to {traj_txt_path}")
+    
+    # Save visualization if mask_id is provided
+    if mask_id is not None:
+        traj_img_path = traj_path.with_suffix('.png')
+        fig = create_mask_visualization(trajectories, mask_id, sampler_name=sampler_name)
+        fig.savefig(traj_img_path, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        print(f"Saved trajectory visualization to {traj_img_path}")
 
 
 def worker_generate(rank, num_devices, samples_per_device, remainder, cfg, checkpoint_path, 
@@ -386,7 +504,15 @@ def main(cfg):
 
     # Save trajectories if enabled
     if return_trajectory and all_trajectories is not None:
-        save_trajectories(all_trajectories, cfg.samples_path, tokenizer, num_samples)
+        # Get mask_id from tokenizer for visualization
+        mask_id = getattr(tokenizer, 'mask_token_id', None)
+        
+        # Extract sampler name from config (just the class name, no params)
+        sampler_target = getattr(model_config.sampling.sampler, '_target_', 'Sampler')
+        sampler_name = sampler_target.split('.')[-1]  # Get class name only
+        
+        save_trajectories(all_trajectories, cfg.samples_path, tokenizer, num_samples, 
+                         mask_id=mask_id, sampler_name=sampler_name)
 
 
 if __name__ == "__main__":
