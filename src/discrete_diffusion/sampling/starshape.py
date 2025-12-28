@@ -16,7 +16,6 @@ from typing import Literal
 
 import torch
 
-from ..forward_process.utils import sample_categorical
 from .absorbing import AbsorbingSampler
 
 

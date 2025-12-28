@@ -27,6 +27,9 @@ class GStarSampler(StarShapeSampler):
           "default": Mask ratio continues decreasing following MDLM schedule.
           "plato": Mask ratio uses rescaled time for smooth schedule continuation.
   """
+  def __init__(self, *args, remasker_temperature: float = 1, **kwargs):
+    super().__init__(*args, **kwargs)
+    self.remasker_temperature = remasker_temperature
 
   def _get_mistake_confidences(self, model, sampled_x0, t):
     """Use remasker logits to identify likely mistakes.
@@ -65,10 +68,11 @@ class GStarSampler(StarShapeSampler):
     return confidences  # [batch, seq_len]
 
   def _sample_positions_to_remask(self, confidences, num_tokens_to_mask):
-    if self.config.remasker_temperature == 0:
+    # Get temperature from sampling config (default 1 for stochastic sampling)
+    if self.remasker_temperature == 0:
       return super()._sample_positions_to_remask(confidences, num_tokens_to_mask)
     else:
-      confidences = confidences / self.config.remasker_temperature
+      confidences = confidences / self.remasker_temperature
       # Convert logits to probabilities and sample without replacement
       probs = F.softmax(confidences, dim=-1)
       mask_positions = torch.multinomial(probs, num_tokens_to_mask, replacement=False)

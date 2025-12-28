@@ -30,7 +30,7 @@ class GStar(MDLM):
         super().__init__(config, tokenizer)
         
         # Store freeze_backbone config
-        self.freeze_backbone = config.algo.freeze_backbone
+        self.freeze_backbone = getattr(config.algo, 'freeze_backbone', True)
         
         # Always freeze MDLM backbone (used for forward pass to get log_x_theta)
         for param in self.backbone.parameters():
@@ -41,9 +41,7 @@ class GStar(MDLM):
         # Create remasker backbone:
         # - If freeze_backbone=True: share with MDLM backbone (no extra params)
         # - If freeze_backbone=False: clone backbone for remasker (separate trainable copy)
-        if self.freeze_backbone:
-            self.remasker_backbone = self.backbone  # Same object, frozen
-        else:
+        if not self.freeze_backbone:
             self.remasker_backbone = deepcopy(self.backbone)  # Separate trainable copy
             # Re-enable gradients (backbone was frozen before deepcopy)
             for param in self.remasker_backbone.parameters():
@@ -67,6 +65,12 @@ class GStar(MDLM):
         # Storage for predictions and targets (set in nll_per_token)
         self._last_preds = None
         self._last_targets = None
+
+    def _get_remasker_backbone(self):
+        if self.freeze_backbone:
+            return self.backbone
+        else:
+            return self.remasker_backbone
         
     def _initialize_metrics(self):
         """Override to use GStar-specific binary classification metrics."""
@@ -139,12 +143,13 @@ class GStar(MDLM):
         # When freeze_backbone=False, remasker_backbone is a separate trainable copy
         context = torch.no_grad() if self.freeze_backbone else torch.enable_grad()
         with context:
+            remasker_backbone = self._get_remasker_backbone()
             with torch.amp.autocast('cuda', dtype=torch.float32):
-                hidden_states = self.remasker_backbone(sampled_x0, sigma_processed, return_hidden_states=True)
-            if self.remasker_backbone.causal:
+                hidden_states = remasker_backbone(sampled_x0, sigma_processed, return_hidden_states=True)
+            if remasker_backbone.causal:
                 t_cond = None
             else:
-                t_cond = F.silu(self.remasker_backbone.sigma_map(sigma_processed))
+                t_cond = F.silu(remasker_backbone.sigma_map(sigma_processed))
         
         # Apply remasker head (trainable)
         with torch.amp.autocast('cuda', dtype=torch.bfloat16):
