@@ -37,26 +37,33 @@ pip install flash-attn --no-build-isolation
 ## Quick Start
 
 ### 1. Training
-Run the Hydra-powered CLI. Here is a minimal example for training MDLM on OpenWebText:
+Run the Hydra-powered CLI. Here is an example for training MDLM on OpenWebText:
 
 ```bash
-PYTHONPATH=src python -u -m discrete_diffusion \
-  data=owt \
-  model=small \
-  algo=mdlm \
-  loader.batch_size=32 \
-  trainer.devices=8 \
-  hydra.run.dir=./outputs/owt/mdlm
+PYTHONPATH=src python -m discrete_diffusion \
+  experiment=mdlm \
+  trainer.devices=8
 ```
 
 ### 2. Sampling
-Once you have a checkpoint, use the generation script:
+Once you have a checkpoint, use the generation script with a sampling experiment config:
 
 ```bash
 PYTHONPATH=src python -m discrete_diffusion.evaluations.generate_samples \
+  experiment=sampling/mdlm \
   checkpoint_path=outputs/owt/mdlm/checkpoints/last.ckpt \
-  num_samples=16 \
-  num_steps=2000
+  device=cuda \
+  devices=8
+```
+
+Also, for generaештп 64 samples and saving text examples
+
+```bash
+PYTHONPATH=src python -m discrete_diffusion.evaluations.generate_samples \
+  'experiment=[sampling/mdlm,sampling/debug]' \
+  checkpoint_path=outputs/owt/mdlm/checkpoints/last.ckpt \
+  device=cuda \
+  devices=8
 ```
 
 ## Extending
