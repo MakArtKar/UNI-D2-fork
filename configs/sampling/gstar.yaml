@@ -5,3 +5,5 @@ defaults:
 sampler:
   _target_: discrete_diffusion.sampling.gstar.GStarSampler
 
+# Temperature for remasker-guided sampling (0 = deterministic top-k, higher = more stochastic)
+remasker_temperature: 1

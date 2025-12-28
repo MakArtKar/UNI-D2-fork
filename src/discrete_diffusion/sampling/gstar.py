@@ -59,8 +59,17 @@ class GStarSampler(StarShapeSampler):
     with torch.no_grad():
       remasker_logits = model._remasker_forward(sampled_x0, sigma)
     
-    # Softmax and take class 1 (mistake) confidence
-    confidences = F.softmax(remasker_logits, dim=-1)[:, :, 1]
+    # equivalent to remasker predicting 1 logit instead of 2
+    confidences = remasker_logits[..., 1] - remasker_logits[..., 0]
     
     return confidences  # [batch, seq_len]
 
+  def _sample_positions_to_remask(self, confidences, num_tokens_to_mask):
+    if self.config.remasker_temperature == 0:
+      return super()._sample_positions_to_remask(confidences, num_tokens_to_mask)
+    else:
+      confidences = confidences / self.config.remasker_temperature
+      # Convert logits to probabilities and sample without replacement
+      probs = F.softmax(confidences, dim=-1)
+      mask_positions = torch.multinomial(probs, num_tokens_to_mask, replacement=False)
+      return mask_positions  # [batch, num_tokens_to_mask]

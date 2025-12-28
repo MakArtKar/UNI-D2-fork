@@ -96,6 +96,11 @@ class StarShapeSampler(AbsorbingSampler):
     """
     return torch.randn(sampled_x0.shape, device=sampled_x0.device)
 
+  def _sample_positions_to_remask(self, confidences, num_tokens_to_mask):
+    # Get indices of top-k positions with highest confidence (these will be masked)
+    _, mask_positions = torch.topk(confidences, k=num_tokens_to_mask, dim=1)
+    return mask_positions  # [batch, num_tokens_to_mask]
+
   def _mask_tokens_starshape(self, model, x, sampled_x0, alpha_s, t, noise_removal_step):
     """Apply StarShape masking: guided masking from sampled x0.
     
@@ -132,10 +137,9 @@ class StarShapeSampler(AbsorbingSampler):
     
     # Get mistake confidences for each position
     confidences = self._get_mistake_confidences(model, sampled_x0, t)
-    
-    # Get indices of top-k positions with highest confidence (these will be masked)
-    _, mask_positions = torch.topk(confidences, k=num_tokens_to_mask, dim=1)
-    
+
+    mask_positions = self._sample_positions_to_remask(confidences, num_tokens_to_mask)
+
     # Create batch indices for advanced indexing
     batch_indices = torch.arange(batch_size, device=sampled_x0.device).unsqueeze(1).expand_as(mask_positions)
     
