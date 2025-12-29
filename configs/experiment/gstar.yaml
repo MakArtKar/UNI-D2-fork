@@ -4,6 +4,11 @@ defaults:
   - mdlm
   - override /algo: gstar
 
+trainer:
+  max_steps: 50_000
+
+training_finetune_path: outputs/owt/mdlm_finetune_len${model.length}/dummy_checkpoints/checkpoints/last.ckpt
+
 hydra:
   run:
     dir: ./outputs/${data.train}/gstar

@@ -7,6 +7,10 @@ defaults:
 
 data:
   cache_dir: /home/ubuntu/.cache/huggingface/datasets
+  wrap: False
+
+model:
+  length: ???
 
 callbacks:
   checkpoint_every_n_steps:
