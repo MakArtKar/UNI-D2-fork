@@ -314,6 +314,7 @@ def worker_generate(rank, num_devices, samples_per_device, remainder, cfg, check
 
 @hydra.main(config_path="../../../configs", config_name="generate_samples", version_base="1.3")
 def main(cfg):
+    print(OmegaConf.to_yaml(cfg, resolve=True))
     # Check if we should use CPU
     use_cpu = cfg.get("device", "cuda") == "cpu"
     

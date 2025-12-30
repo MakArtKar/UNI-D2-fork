@@ -80,22 +80,6 @@ class StarShapeSampler(AbsorbingSampler):
     t_rescaled = 1 - progress
     return model.noise.alpha_t(t_rescaled)
 
-  def _get_mistake_confidences(self, model, sampled_x0, t):
-    """Return confidence scores indicating likelihood each token is a mistake.
-    
-    Higher values indicate higher confidence that the token should be remasked.
-    This base implementation returns random values for random remasking.
-    
-    Args:
-      model: The diffusion model.
-      sampled_x0: Sampled x0 from model [batch, seq_len].
-      t: Current timestep [batch, 1].
-      
-    Returns:
-      Tensor: Confidence scores [batch, seq_len]. Higher = more likely mistake.
-    """
-    return torch.randn(sampled_x0.shape, device=sampled_x0.device)
-
   def _sample_positions_to_remask(self, confidences, num_tokens_to_mask):
     # Get indices of top-k positions with highest confidence (these will be masked)
     _, mask_positions = torch.topk(confidences, k=num_tokens_to_mask, dim=1)
@@ -136,7 +120,7 @@ class StarShapeSampler(AbsorbingSampler):
       return sampled_x0
     
     # Get mistake confidences for each position
-    confidences = self._get_mistake_confidences(model, sampled_x0, t)
+    confidences = torch.randn(sampled_x0.shape, device=sampled_x0.device)
 
     mask_positions = self._sample_positions_to_remask(confidences, num_tokens_to_mask)
 
