@@ -33,7 +33,7 @@ def _unsqueeze(x: torch.Tensor, reference: torch.Tensor) -> torch.Tensor:
   return x.view(*x.shape, * ((1,) * (len(reference.shape) - len(x.shape))))
 
 
-def sample_categorical(categorical_probs: torch.Tensor) -> torch.Tensor:
+def sample_categorical(categorical_probs: torch.Tensor, temperature: float = 1.0) -> torch.Tensor:
   """Sample categories via a Gumbel-max formulation for stability.
 
   Expects `categorical_probs` to be non-negative and to sum to one along the
@@ -41,5 +41,4 @@ def sample_categorical(categorical_probs: torch.Tensor) -> torch.Tensor:
   existing absorbing helpers for consistency.
   """
   gumbel_norm = 1e-10 - (torch.rand_like(categorical_probs) + 1e-10).log()
-  return (categorical_probs / gumbel_norm).argmax(dim=-1)
-
+  return (categorical_probs.log() / max(temperature, 1e-10) - gumbel_norm.log()).argmax(dim=-1)

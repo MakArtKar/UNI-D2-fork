@@ -35,9 +35,9 @@ class AbsorbingSampler(Sampler):
         x, model._sigma_from_alphat(alpha_t))
       if self.config.sampling.use_float64:
         log_p_x0 = log_p_x0.to(torch.float64)
-      p_x0 = log_p_x0.exp() / self.diffusion_temperature
+      p_x0 = log_p_x0.exp()
     
-    sampled_x0 = sample_categorical(p_x0)
+    sampled_x0 = sample_categorical(p_x0, self.diffusion_temperature)
     return p_x0, sampled_x0
 
   def _mask_tokens_mdlm(self, model, x, sampled_x0, alpha_t, alpha_s):

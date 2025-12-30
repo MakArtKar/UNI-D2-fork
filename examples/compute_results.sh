@@ -13,7 +13,13 @@ source .venv/bin/activate
 export PYTHONPATH=src
 
 # Common settings
-COMMON_ARGS="devices=8 device=cuda max_length=512"
+COMMON_ARGS="devices=8 \
+    device=cuda \
+    max_length=512 \
+    sampling.use_float64=false \
+    sampling.p_nucleus=0.9 \
+    sampling.sampler.diffusion_temperature=0.9,1.0,1.1,1.2 \
+    num_steps=128"
 METRICS_ARGS="devices=8 device=cuda max_length=512"
 
 # Function to compute metrics for all .pt files in a directory
@@ -53,11 +59,7 @@ echo ""
 python -m discrete_diffusion.evaluations.generate_samples --multirun \
     experiment=sampling/mdlm \
     ${COMMON_ARGS} \
-    base_samples_path=samples/mdlm \
-    sampling.use_float64=false \
-    sampling.p_nucleus=0.9 \
-    sampling.sampler.diffusion_temperature=0.9,1.0,1.1,1.2 \
-    num_steps=128,256,512
+    base_samples_path=samples/mdlm
 
 echo ""
 echo ">>> 1. MDLM Metrics"
@@ -73,12 +75,7 @@ echo ""
 python -m discrete_diffusion.evaluations.generate_samples --multirun \
     experiment=sampling/gstar \
     ${COMMON_ARGS} \
-    base_samples_path=samples/gstar \
-    sampling.use_float64=false \
-    sampling.p_nucleus=0.9 \
-    sampling.sampler.diffusion_temperature=0.9,1.0,1.1,1.2 \
-    sampling.sampler.remasker_temperature=0,1 \
-    num_steps=128,256,512
+    sampling.sampler.remasker_temperature=0,1
 
 echo ""
 echo ">>> 2. GStar Metrics"
@@ -96,11 +93,7 @@ python -m discrete_diffusion.evaluations.generate_samples --multirun \
     ${COMMON_ARGS} \
     checkpoint_path=outputs/owt/gstar_len512_finetune_backbone/dummy_checkpoints/checkpoints/best.ckpt \
     base_samples_path=samples/gstar_finetune_backbone \
-    sampling.use_float64=false \
-    sampling.p_nucleus=0.9 \
-    sampling.sampler.diffusion_temperature=0.9,1.0,1.1,1.2 \
-    sampling.sampler.remasker_temperature=0,1 \
-    num_steps=128,256,512
+    sampling.sampler.remasker_temperature=0,1
 
 echo ""
 echo ">>> 3. GStar + Finetune Backbone Metrics"
@@ -118,11 +111,7 @@ python -m discrete_diffusion.evaluations.generate_samples --multirun \
     ${COMMON_ARGS} \
     checkpoint_path=outputs/owt/gstar_len512_time_conditioning_finetune_backbone/dummy_checkpoints/checkpoints/best.ckpt \
     base_samples_path=samples/gstar_time_cond_finetune_backbone \
-    sampling.use_float64=false \
-    sampling.p_nucleus=0.9 \
-    sampling.sampler.diffusion_temperature=0.9,1.0,1.1,1.2 \
-    sampling.sampler.remasker_temperature=0,1 \
-    num_steps=128,256,512
+    sampling.sampler.remasker_temperature=0,1
 
 echo ""
 echo ">>> 4. GStar + Finetune Backbone + Time Conditioning Metrics"
@@ -143,11 +132,7 @@ python -m discrete_diffusion.evaluations.generate_samples --multirun \
     base_samples_path=samples/starshape \
     sampling.sampler.remasker_schedule=default \
     sampling.sampler.t_on=0.2 \
-    sampling.sampler.t_off=0 \
-    sampling.use_float64=false \
-    sampling.p_nucleus=0.9 \
-    sampling.sampler.diffusion_temperature=0.9,1.0,1.1,1.2 \
-    num_steps=128,256,512
+    sampling.sampler.t_off=0
 
 echo ""
 echo ">>> 5. StarShape Sampling (Regime B: plato schedule)"
@@ -160,11 +145,7 @@ python -m discrete_diffusion.evaluations.generate_samples --multirun \
     base_samples_path=samples/starshape \
     sampling.sampler.remasker_schedule=plato \
     sampling.sampler.t_on=0.55 \
-    sampling.sampler.t_off=0.05 \
-    sampling.use_float64=false \
-    sampling.p_nucleus=0.9 \
-    sampling.sampler.diffusion_temperature=0.9,1.0,1.1,1.2 \
-    num_steps=128,256,512
+    sampling.sampler.t_off=0.05
 
 echo ""
 echo ">>> 5. StarShape Metrics"
