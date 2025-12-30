@@ -1,7 +1,7 @@
 # @package _global_
 
 base_samples_path: example_samples
-num_samples: 64
+num_samples: 8
 batch_size: 8
 save_text: true
 return_trajectory: true

@@ -62,4 +62,6 @@ tmp*/
 checkpoints/
 samples/
 example_samples/
+trajectories/
 example_trajectories/
+metrics/
