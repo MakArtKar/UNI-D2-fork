@@ -1,0 +1,83 @@
+"""GStarSampler - extends StarShape with remasker-guided token selection.
+
+GStarSampler uses a trained remasker model to identify which tokens are likely
+mistakes, then preferentially remasks those tokens instead of random selection.
+"""
+
+from __future__ import annotations
+
+import torch
+import torch.nn.functional as F
+
+from .starshape import StarShapeSampler
+
+
+class GStarSampler(StarShapeSampler):
+  """GStar-guided remasking using trained remasker predictions.
+  
+  Extends StarShapeSampler by overriding _get_mistake_confidences() to use
+  the remasker model's predictions instead of random values.
+  
+  Args:
+    config: Hydra config object containing sampling parameters.
+    forward_process: Optional forward diffusion process (unused in sampling).
+    t_on: Transition point to enable StarShape strategy. Default 0.55.
+    t_off: Transition point to disable StarShape strategy. Default 0.05.
+    remasker_schedule: Controls mask ratio behavior.
+          "default": Mask ratio continues decreasing following MDLM schedule.
+          "plato": Mask ratio uses rescaled time for smooth schedule continuation.
+  """
+  def __init__(self, config, forward_process=None, t_on=0.55, t_off=0.05,
+               remasker_schedule="default", diffusion_temperature=1,
+               remasker_temperature: float = 1):
+    super().__init__(config, forward_process, t_on=t_on, t_off=t_off,
+                     remasker_schedule=remasker_schedule,
+                     diffusion_temperature=diffusion_temperature)
+    self.remasker_temperature = remasker_temperature
+
+  def _get_mistake_confidences(self, model, sampled_x0, t):
+    """Use remasker logits to identify likely mistakes.
+    
+    Calls the model's _remasker_forward() to get binary classification logits,
+    then returns the softmax probability of class 1 (mistake) as confidence.
+    
+    Args:
+      model: The GStar diffusion model with _remasker_forward().
+      sampled_x0: Sampled x0 from model [batch, seq_len].
+      t: Current timestep [batch, 1].
+      
+    Returns:
+      Tensor: Mistake confidence scores [batch, seq_len]. Higher = more likely mistake.
+      
+    Raises:
+      ValueError: If model does not have _remasker_forward method.
+    """
+    if not hasattr(model, '_remasker_forward'):
+      raise ValueError(
+        "GStarSampler requires a GStar model with _remasker_forward() method. "
+        "Make sure you're using a GStar checkpoint, not an MDLM checkpoint."
+      )
+    
+    # Compute sigma from t
+    alpha_t = model.noise.alpha_t(t)
+    sigma = model._sigma_from_alphat(alpha_t)
+    
+    # Get remasker predictions [batch, seq_len, 2]
+    with torch.no_grad():
+      remasker_logits = model._remasker_forward(sampled_x0, sigma)
+    
+    # equivalent to remasker predicting 1 logit instead of 2
+    confidences = remasker_logits[..., 1] - remasker_logits[..., 0]
+    
+    return confidences  # [batch, seq_len]
+
+  def _sample_positions_to_remask(self, confidences, num_tokens_to_mask):
+    # Get temperature from sampling config (default 1 for stochastic sampling)
+    if self.remasker_temperature == 0:
+      return super()._sample_positions_to_remask(confidences, num_tokens_to_mask)
+    else:
+      confidences = confidences / self.remasker_temperature
+      # Convert logits to probabilities and sample without replacement
+      probs = F.softmax(confidences, dim=-1)
+      mask_positions = torch.multinomial(probs, num_tokens_to_mask, replacement=False)
+      return mask_positions  # [batch, num_tokens_to_mask]

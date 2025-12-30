@@ -11,9 +11,62 @@ from .base import Sampler
 class AbsorbingSampler(Sampler):
   """Sampler that mirrors Diffusion.generate_samples() for absorbing models."""
 
-  def __init__(self, config, forward_process=None):
+  def __init__(self, config, forward_process=None, diffusion_temperature=1):
     self.config = config
     self.forward_process = forward_process
+    self.diffusion_temperature = diffusion_temperature
+
+  def _sample_x0(self, model, x, t, p_x0=None):
+    """Sample x0 from model predictions.
+    
+    Args:
+      model: The diffusion model.
+      x: Current sequence [batch, length].
+      t: Current timestep [batch, 1].
+      p_x0: Optional cached probability distribution over x0.
+      
+    Returns:
+      p_x0: Probability distribution over x0 [batch, length, vocab].
+      sampled_x0: Sampled x0 [batch, length].
+    """
+    if p_x0 is None:
+      alpha_t = model.noise.alpha_t(t)
+      log_p_x0 = model.forward(
+        x, model._sigma_from_alphat(alpha_t))
+      if self.config.sampling.use_float64:
+        log_p_x0 = log_p_x0.to(torch.float64)
+      p_x0 = log_p_x0.exp()
+    
+    sampled_x0 = sample_categorical(p_x0, self.diffusion_temperature)
+    return p_x0, sampled_x0
+
+  def _mask_tokens_mdlm(self, model, x, sampled_x0, alpha_t, alpha_s):
+    """Apply MDLM masking: denoise only already-masked positions.
+    
+    This implements the standard MDLM denoising strategy where:
+    - Only positions that are currently masked can be denoised
+    - Each masked position is denoised with probability (alpha_s - alpha_t) / (1 - alpha_t)
+    - Once denoised, positions stay denoised (irreversible)
+    
+    Args:
+      model: The diffusion model.
+      x: Current sequence [batch, length].
+      sampled_x0: Sampled x0 from model [batch, length].
+      alpha_t: Noise level at time t [batch, 1].
+      alpha_s: Noise level at time s = t - dt [batch, 1].
+      
+    Returns:
+      out: Partially denoised sequence [batch, length].
+    """
+    prob_denoise = (alpha_s - alpha_t) / (1 - alpha_t)
+    should_denoise_draw = (
+      torch.rand_like(x, dtype=torch.float64, device=x.device)
+      < prob_denoise)
+    is_masked = (x == model.mask_id)
+    should_denoise_mask = is_masked & should_denoise_draw
+    _x = torch.where(should_denoise_mask, sampled_x0, x)
+    out = torch.where(x != model.mask_id, x, _x)
+    return out
 
   def compute_posterior(self, model, x, t, dt, p_x0=None,
                         noise_removal_step=False):
@@ -23,26 +76,14 @@ class AbsorbingSampler(Sampler):
     else:
       alpha_s = model.noise.alpha_t(t - dt)
     assert alpha_t.ndim == 2
-    if p_x0 is None:
-      log_p_x0 = model.forward(
-        x, model._sigma_from_alphat(alpha_t))
-      if self.config.sampling.use_float64:
-        log_p_x0 = log_p_x0.to(torch.float64)
-      p_x0 = log_p_x0.exp()
-
-    sampled_x0 = sample_categorical(p_x0)
-    prob_denoise = (alpha_s - alpha_t) / (1 - alpha_t)
-    should_denoise_draw = (
-      torch.rand_like(x, dtype=torch.float64, device=x.device)
-      < prob_denoise)
-    is_masked = (x == model.mask_id)
-    should_denoise_mask = is_masked & should_denoise_draw
-    _x = torch.where(should_denoise_mask, sampled_x0, x)
-    out = torch.where(x != model.mask_id, x, _x)
+    
+    p_x0, sampled_x0 = self._sample_x0(model, x, t, p_x0)
+    out = self._mask_tokens_mdlm(model, x, sampled_x0, alpha_t, alpha_s)
     return p_x0, out
 
   @torch.no_grad()
-  def generate(self, model, *, num_samples, num_steps, eps, inject_bos):
+  def generate(self, model, *, num_samples, num_steps, eps, inject_bos,
+               return_trajectory=False):
     if num_steps is None:
       num_steps = self.config.sampling.steps
     x = model.prior_sample(num_samples, model.num_tokens)
@@ -54,6 +95,9 @@ class AbsorbingSampler(Sampler):
     dt = (1 - eps) / num_steps
     p_x0_cache = None
     predictor = self.config.sampling.predictor
+
+    # Track trajectory if requested
+    trajectory = [x.clone()] if return_trajectory else None
 
     for i in range(num_steps):
       t = timesteps[i] * torch.ones(
@@ -71,11 +115,18 @@ class AbsorbingSampler(Sampler):
       else:
         raise ValueError(f'Unsupported predictor: {predictor}')
 
+      if return_trajectory:
+        trajectory.append(x.clone())
+
     t0 = timesteps[-1] * torch.ones(x.shape[0], 1, device=model.device)
 
     _, x = self.compute_posterior(
       model=model, x=x, t=t0, dt=None,
       p_x0=p_x0_cache,
       noise_removal_step=True)
+
+    if return_trajectory:
+      trajectory.append(x.clone())
+      return x, trajectory
 
     return x

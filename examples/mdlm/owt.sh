@@ -8,15 +8,15 @@ export PYTHONPATH=src
 
 python -u -m discrete_diffusion \
     data=openwebtext-split \
-    data.cache_dir='/home/hk-project-p0023960/hgf_nhz3359/New_Discrete_Diffusion-main/datasets/pgm_owt/' \
+    data.cache_dir=/home/ubuntu/.cache/huggingface/datasets \
     model=small \
     algo=mdlm \
     training.torch_compile=true \
     loader.batch_size=16 \
     loader.eval_batch_size=16 \
     loader.num_workers=4 \
-    trainer.num_nodes=8 \
-    trainer.devices=4 \
+    trainer.num_nodes=1 \
+    trainer.devices=1 \
     trainer.val_check_interval=1000 \
     trainer.log_every_n_steps=100 \
     callbacks.checkpoint_every_n_steps.every_n_train_steps=10_000 \

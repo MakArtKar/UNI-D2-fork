@@ -1,0 +1,10 @@
+# @package _global_
+
+defaults:
+  - /experiment/sampling/mdlm@_global_
+  - override /sampling: starshape
+
+samples_path: ${base_samples_path}/starshape_float64_${sampling.use_float64}_nucleus_${sampling.p_nucleus}_difftemp_${sampling.sampler.diffusion_temperature}_t_on_${sampling.sampler.t_on}_t_off_${sampling.sampler.t_off}_schedule_${sampling.sampler.remasker_schedule}_len_${max_length}_steps_${num_steps}.pt
+# compatability with configs/sampling/starshape
+model:
+  length: ${max_length}

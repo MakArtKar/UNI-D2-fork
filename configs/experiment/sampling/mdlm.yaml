@@ -1,0 +1,13 @@
+# @package _global_
+
+defaults:
+  - override /sampling: default
+
+base_samples_path: samples
+
+max_length: ???
+checkpoint_path: outputs/owt/mdlm_finetune_len${max_length}/dummy_checkpoints/checkpoints/last.ckpt
+samples_path: ${base_samples_path}/mdlm_float64_${sampling.use_float64}_nucleus_${sampling.p_nucleus}_difftemp_${sampling.sampler.diffusion_temperature}_len_${max_length}_steps_${num_steps}.pt
+num_samples: 5000
+batch_size: 64
+num_steps: ${max_length}

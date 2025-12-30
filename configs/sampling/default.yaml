@@ -15,3 +15,4 @@ save_samples: false
 samples_path: null
 sampler:
   _target_: discrete_diffusion.sampling.absorbing.AbsorbingSampler
+  diffusion_temperature: 1
